@@ -16,6 +16,14 @@ import type { LucideIcon } from "lucide-react";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useMemo, useState } from "react";
 import {
+  createSyncSpace,
+  disableSync,
+  fetchSyncStatus,
+  joinSyncSpace,
+  syncPullNow,
+  type SyncStatus
+} from "./syncApi";
+import {
   formatKeyboardShortcut,
   modifierDisplayName,
   shortcutFromKeyboardEvent
@@ -370,18 +378,98 @@ function PreferenceSyncSection({
   updatePreferences: UpdatePreferences;
 }) {
   const sync = preferences.sync;
+  const [pairingCode, setPairingCode] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const refreshSyncStatus = () => {
+    void fetchSyncStatus()
+      .then((status) => setSyncStatus(status))
+      .catch((error) => console.error("Failed to fetch sync status", error));
+  };
+
+  useEffect(() => {
+    refreshSyncStatus();
+  }, []);
+
+  const handleCreateSpace = async () => {
+    setSyncBusy(true);
+    setSyncMessage(null);
+    try {
+      const result = await createSyncSpace(sync.serverUrl, sync.deviceName || "Windows PC");
+      setPairingCode(result.pairingCode);
+      setSyncMessage(`已创建同步空间，配对码：${result.pairingCode}`);
+      updatePreferences((current) => ({
+        ...current,
+        sync: { ...current.sync, syncSpaceJoined: true, enabled: true }
+      }));
+      refreshSyncStatus();
+    } catch (error) {
+      setSyncMessage(`创建失败：${error}`);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const handleJoinSpace = async () => {
+    if (joinCode.trim().length === 0) {
+      setSyncMessage("请输入同步码");
+      return;
+    }
+    setSyncBusy(true);
+    setSyncMessage(null);
+    try {
+      const report = await joinSyncSpace(
+        sync.serverUrl,
+        joinCode.trim().toUpperCase(),
+        sync.deviceName || "Windows PC"
+      );
+      setSyncMessage(`已加入同步空间，初始同步 ${report.appliedEvents} 条事件`);
+      updatePreferences((current) => ({
+        ...current,
+        sync: { ...current.sync, syncSpaceJoined: true, enabled: true }
+      }));
+      refreshSyncStatus();
+    } catch (error) {
+      setSyncMessage(`加入失败：${error}`);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setSyncBusy(true);
+    setSyncMessage(null);
+    try {
+      const report = await syncPullNow();
+      setSyncMessage(`同步完成，应用 ${report.appliedEvents} 条事件`);
+      refreshSyncStatus();
+    } catch (error) {
+      setSyncMessage(`同步失败：${error}`);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   return (
     <div className="preferences-section-stack">
       <PreferenceSectionGroup title="服务端">
         <PreferenceRow title="启用同步" detail="开启后使用自托管服务端同步剪贴板元数据">
           <SwitchControl
             checked={sync.enabled}
-            onChange={(enabled) =>
+            onChange={(enabled) => {
               updatePreferences((current) => ({
                 ...current,
                 sync: { ...current.sync, enabled }
-              }))
-            }
+              }));
+              if (!enabled) {
+                void disableSync().catch((error) =>
+                  console.error("Failed to disable sync", error)
+                );
+              }
+            }}
           />
         </PreferenceRow>
         <PreferenceDivider />
@@ -430,11 +518,22 @@ function PreferenceSyncSection({
       <PreferenceSectionGroup title="同步空间">
         <PreferenceRow
           title="当前同步空间"
-          detail={sync.syncSpaceJoined ? "当前设备已加入一个同步空间" : "尚未加入同步"}
+          detail={
+            syncStatus?.joined
+              ? `已加入 · 游标 ${syncStatus.cursor}`
+              : sync.syncSpaceJoined
+                ? "当前设备已加入一个同步空间"
+                : "尚未加入同步"
+          }
         >
           <div className="preference-pill-row">
-            <PreferenceValuePill text={sync.syncSpaceJoined ? "已加入" : "未加入"} prominent />
-            <PreferenceValuePill text={sync.enabled ? "已启用" : "未启用"} />
+            <PreferenceValuePill
+              text={syncStatus?.joined ?? sync.syncSpaceJoined ? "已加入" : "未加入"}
+              prominent
+            />
+            <PreferenceValuePill
+              text={(syncStatus?.enabled ?? sync.enabled) ? "已启用" : "未启用"}
+            />
           </div>
         </PreferenceRow>
         <PreferenceDivider />
@@ -457,36 +556,51 @@ function PreferenceSyncSection({
             <button
               className="preference-push-button"
               type="button"
-              onClick={() =>
-                updatePreferences((current) => ({
-                  ...current,
-                  sync: { ...current.sync, syncSpaceJoined: true, enabled: true }
-                }))
-              }
+              disabled={syncBusy || !sync.serverUrl}
+              onClick={() => void handleCreateSpace()}
             >
               创建同步空间
             </button>
-            <input className="preference-code-input" maxLength={5} placeholder="同步码" />
+            <input
+              className="preference-code-input"
+              maxLength={5}
+              placeholder="同步码"
+              value={joinCode}
+              onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+            />
             <button
               className="preference-push-button"
               type="button"
-              onClick={() =>
-                updatePreferences((current) => ({
-                  ...current,
-                  sync: { ...current.sync, syncSpaceJoined: true, enabled: true }
-                }))
-              }
+              disabled={syncBusy || !sync.serverUrl}
+              onClick={() => void handleJoinSpace()}
             >
               加入
             </button>
           </div>
+          {pairingCode && (
+            <PreferenceInlineValue value={`配对码：${pairingCode}（分享给其他设备加入）`} />
+          )}
+          {syncMessage && <PreferenceStatusLabel text={syncMessage} />}
         </PreferenceStackedRow>
         <PreferenceDivider />
-        <PreferenceStackedRow title="连接状态" detail="测试当前服务端地址和设备凭据是否可用">
+        <PreferenceStackedRow title="立即同步" detail="推送本机待同步项并拉取其他设备的更新">
           <div className="preference-status-row">
-            <PreferenceStatusLabel text={sync.serverUrl ? "已配置服务端" : "尚未检查连接"} />
-            <button className="preference-push-button" type="button">
-              测试连接
+            <PreferenceStatusLabel
+              text={
+                syncStatus?.joined
+                  ? `游标 ${syncStatus.cursor} · 快照 ${syncStatus.snapshotSeq}`
+                  : sync.serverUrl
+                    ? "已配置服务端"
+                    : "尚未检查连接"
+              }
+            />
+            <button
+              className="preference-push-button"
+              type="button"
+              disabled={syncBusy || !syncStatus?.joined}
+              onClick={() => void handleSyncNow()}
+            >
+              立即同步
             </button>
           </div>
         </PreferenceStackedRow>

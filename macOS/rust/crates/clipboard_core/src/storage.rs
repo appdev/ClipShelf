@@ -7,6 +7,7 @@ mod queries;
 mod source_apps;
 mod support;
 mod sync_apply;
+mod sync_outbound;
 #[cfg(test)]
 mod tests;
 

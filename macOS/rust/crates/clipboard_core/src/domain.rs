@@ -331,6 +331,26 @@ pub struct SyncApplyOutcome {
     pub changed_item_ids: Vec<String>,
 }
 
+/// A locally captured item that is pending upload to the sync server, already
+/// shaped into the wire payload other devices expect. Asset-backed types
+/// (image, file) are excluded until P2P/server asset transfer is wired up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncPendingEvent {
+    pub content_hash: String,
+    pub item_type: String,
+    pub payload: serde_json::Value,
+    pub copy_count_delta: i64,
+    pub client_event_id: String,
+}
+
+/// Acknowledgement that a pending event was accepted by the server, used to
+/// transition its local state from `local_pending_upload` to `synced_local`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncUploadedEvent {
+    pub content_hash: String,
+    pub server_seq: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinboardSummary {
     pub id: String,

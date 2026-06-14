@@ -1,8 +1,26 @@
+use clipboard_core::{
+    CaptureImageRequest, CaptureTextRequest, SourceConfidence, SyncLocalPendingRequest,
+};
 use image::{ImageReader, RgbaImage};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{borrow::Cow, fs, path::PathBuf};
 use tauri::{AppHandle, Manager};
+
+use crate::core_state::CoreState;
+
+/// Monotonic counter for generating unique client event ids per capture.
+static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn next_client_event_id() -> String {
+    let counter = EVENT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    format!("win-{now_ms}-{counter}")
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +82,119 @@ pub fn read_clipboard_snapshot(app: AppHandle) -> Result<Option<ClipboardSnapsho
         image_width: Some(width),
         image_height: Some(height),
     }))
+}
+
+/// Persist a freshly detected clipboard snapshot into the shared
+/// `clipboard_core` database so history survives restarts and feeds sync.
+///
+/// Best-effort: failures are logged but never interrupt the capture pipeline,
+/// since the live UI event is emitted regardless. Re-copying existing content
+/// is handled by the core (it bumps `copy_count` rather than duplicating).
+pub fn persist_snapshot(app: &AppHandle, snapshot: &ClipboardSnapshot) {
+    let Some(state) = app.try_state::<CoreState>() else {
+        return;
+    };
+
+    let result = match snapshot.kind {
+        ClipboardSnapshotKind::Text => persist_text_snapshot(&state, snapshot),
+        ClipboardSnapshotKind::Image => persist_image_snapshot(&state, snapshot),
+    };
+
+    if let Err(message) = result {
+        eprintln!("clipboard persistence failed: {message}");
+    }
+}
+
+fn persist_text_snapshot(state: &CoreState, snapshot: &ClipboardSnapshot) -> Result<(), String> {
+    let Some(text) = snapshot.text.clone() else {
+        return Ok(());
+    };
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    let request = CaptureTextRequest {
+        text,
+        detected_link: None,
+        display_rtf_relative_path: None,
+        display_rtf_mime_type: None,
+        display_rtf_byte_count: 0,
+        source_bundle_id: None,
+        source_app_name: None,
+        source_bundle_path: None,
+        source_icon_relative_path: None,
+        source_confidence: SourceConfidence::Unknown,
+        pasteboard_change_count: 0,
+        self_write_token: None,
+    };
+
+    state.with_core(|core| {
+        let result = core
+            .capture_text(request)
+            .map_err(|error| error.to_string())?;
+
+        // If sync is configured, mark this capture for upload so the
+        // background pusher propagates it to other devices.
+        let prefs = core.get_preferences().map_err(|error| error.to_string())?;
+        if prefs.sync.enabled {
+            if let Some(sync_id) = prefs.sync.sync_id.filter(|value| !value.is_empty()) {
+                core.mark_sync_local_pending(SyncLocalPendingRequest {
+                    sync_id,
+                    // Capture stores a bare blake3 hex; the sync API expects
+                    // the `blake3:`-prefixed wire form.
+                    content_hash: format!("blake3:{}", result.content_hash),
+                    item_id: Some(result.item_id.clone()),
+                    client_event_id: next_client_event_id(),
+                })
+                .map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
+    })
+}
+
+fn persist_image_snapshot(state: &CoreState, snapshot: &ClipboardSnapshot) -> Result<(), String> {
+    let Some(source_path) = snapshot.image_path.as_deref() else {
+        return Ok(());
+    };
+
+    // `capture_image` hashes the payload file relative to the core data root,
+    // so copy the captured PNG into `<root>/assets/` before recording it.
+    let relative_path = format!("assets/clipboard-image-{}.png", snapshot.change_key);
+    let destination = state.root_dir().join(&relative_path);
+
+    if !destination.exists() {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::copy(source_path, &destination).map_err(|error| error.to_string())?;
+    }
+
+    let byte_count = fs::metadata(&destination)
+        .map(|metadata| metadata.len() as i64)
+        .unwrap_or(0);
+
+    let request = CaptureImageRequest {
+        payload_relative_path: relative_path,
+        preview_relative_path: None,
+        mime_type: Some("image/png".to_string()),
+        width: snapshot.image_width.unwrap_or(0) as i64,
+        height: snapshot.image_height.unwrap_or(0) as i64,
+        byte_count,
+        source_bundle_id: None,
+        source_app_name: None,
+        source_bundle_path: None,
+        source_icon_relative_path: None,
+        source_confidence: SourceConfidence::Unknown,
+        pasteboard_change_count: 0,
+        self_write_token: None,
+    };
+
+    state.with_core(|core| {
+        core.capture_image(request)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 #[tauri::command]

@@ -47,6 +47,8 @@ import {
   togglePinnedItem
 } from "./panel/panelInteractions";
 import { applyResolvedPanelAssets, resolvePanelNativeAssets } from "./panel/nativeAssets";
+import { loadStoredPanelItems } from "./panel/panelStore";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { ClipItem, ClipKind, SourceKind } from "./panel/panelTypes";
 import { PreferencesApp } from "./preferences/PreferencesApp";
 import {
@@ -120,6 +122,7 @@ function PanelApp() {
   const capturedClipboardKeysRef = useRef<Set<string>>(new Set());
   const selfWriteClipboardKeyRef = useRef<string | null>(null);
   const clipboardPollInFlightRef = useRef(false);
+  const pendingGlobalDeleteHashesRef = useRef<Map<string, string>>(new Map());
 
   const filteredItems = useMemo(() => {
     const normalizedSearch = searchText.trim().toLocaleLowerCase();
@@ -146,6 +149,26 @@ function PanelApp() {
       })
       .catch((error) => {
         console.error("Failed to resolve native panel assets", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadStoredPanelItems()
+      .then((storedItems) => {
+        if (cancelled || storedItems.length === 0) {
+          return;
+        }
+        // Replace the seeded demo items with persisted history and seed
+        // the dedup set so the live monitor does not re-add existing rows.
+        setItems(storedItems);
+        setSelectedItemId(storedItems[0]?.id ?? "");
+      })
+      .catch((error) => {
+        console.error("Failed to load stored clipboard history", error);
       });
     return () => {
       cancelled = true;
@@ -343,6 +366,12 @@ function PanelApp() {
         return;
       }
 
+      if (event.ctrlKey && event.shiftKey && event.key === "D") {
+        event.preventDefault();
+        copyClipboardDiagnostics();
+        return;
+      }
+
       if (
         event.key >= "1" &&
         event.key <= "9" &&
@@ -492,15 +521,64 @@ function PanelApp() {
   }
 
   function deleteItem(item: ClipItem) {
+    // Only track global deletes for non-pinned items (sync behavior)
+    if (!item.isPinned) {
+      const contentHash = hashItemContent(item);
+      pendingGlobalDeleteHashesRef.current.set(item.id, contentHash);
+    }
     setItems((currentItems) => deletePanelItem(currentItems, item.id));
     setContextMenu(null);
     showPanelShortcutToast(`已删除 · ${item.title}`);
+
+    // Persist the deletion to the database (best-effort). Only items that
+    // originate from storage carry a database id; locally seeded demo items
+    // are ignored by the backend.
+    if (isTauri()) {
+      void invoke("delete_clipboard_item", { itemId: item.id }).catch((error) => {
+        console.error("Failed to delete clipboard item from database", error);
+      });
+    }
   }
 
   function toggleItemPinned(item: ClipItem) {
     setItems((currentItems) => togglePinnedItem(currentItems, item.id));
     setContextMenu(null);
     showPanelShortcutToast(`${item.isPinned ? "取消固定" : "已固定"} · ${item.title}`);
+  }
+
+  function copyClipboardDiagnostics() {
+    const diagnosticsReport = generateClipboardDiagnostics(filteredItems);
+    const payload = clipboardPayloadForItem({
+      id: "diagnostics",
+      kind: "text",
+      typeLabel: "诊断",
+      relativeTime: "now",
+      title: "剪贴板诊断信息",
+      summary: diagnosticsReport,
+      footer: "diagnostics",
+      commandIndex: "0",
+      sourceName: "ClipDock",
+      sourceKind: "clipboard",
+      sourcePathHints: { macos: [], windows: [] },
+      sourceColor: "#0a84ff",
+      selectedColor: "#0a84ff",
+      pinboardIds: [],
+      isPinned: false
+    });
+
+    if (!payload || payload.kind !== "text") {
+      showPanelShortcutToast("诊断复制失败");
+      return;
+    }
+
+    void writeClipboardText(payload.text)
+      .then(() => {
+        showPanelShortcutToast("已复制诊断信息");
+      })
+      .catch((error) => {
+        console.error("Failed to copy diagnostics", error);
+        showPanelShortcutToast("复制诊断信息失败");
+      });
   }
 
   function openCardContextMenu(event: React.MouseEvent<HTMLElement>, item: ClipItem) {
@@ -1013,4 +1091,65 @@ function EmptyState() {
       <span>调整搜索或筛选条件</span>
     </div>
   );
+}
+
+function generateClipboardDiagnostics(items: ClipItem[]): string {
+  const timestamp = new Date().toISOString();
+  const appVersion = navigator.appVersion || "Unknown";
+  const userAgent = navigator.userAgent || "Unknown";
+  const pinnedCount = items.filter((item) => item.isPinned).length;
+
+  return [
+    "=== ClipDock 诊断报告 ===",
+    `生成时间: ${timestamp}`,
+    `应用版本: 0.1.0 (Windows Panel)`,
+    `用户代理: ${userAgent}`,
+    "",
+    "=== 剪贴历史统计 ===",
+    `总项数: ${items.length}`,
+    `已固定: ${pinnedCount}`,
+    `未固定: ${items.length - pinnedCount}`,
+    "",
+    "=== 类型分布 ===",
+    getItemKindDistribution(items),
+    "",
+    "=== 系统信息 ===",
+    `屏幕分辨率: ${window.screen.width}x${window.screen.height}`,
+    `可用高度: ${window.screen.availHeight}`,
+    `页面宽度: ${window.innerWidth}x${window.innerHeight}`,
+    "",
+    "=== 最近项目 (前5个) ===",
+    items
+      .slice(0, 5)
+      .map((item, index) => `${index + 1}. [${item.kind}] ${item.title} (${item.relativeTime})`)
+      .join("\n"),
+    "",
+    "=== 固定项目 ===",
+    items
+      .filter((item) => item.isPinned)
+      .map((item) => `- [${item.kind}] ${item.title}`)
+      .join("\n") || "无"
+  ].join("\n");
+}
+
+function getItemKindDistribution(items: ClipItem[]): string {
+  const distribution: Record<string, number> = {};
+  items.forEach((item) => {
+    distribution[item.kind] = (distribution[item.kind] || 0) + 1;
+  });
+  return Object.entries(distribution)
+    .map(([kind, count]) => `  ${kind}: ${count}`)
+    .join("\n");
+}
+
+function hashItemContent(item: ClipItem): string {
+  // Simple content hash for local tracking (not cryptographic)
+  const content = `${item.id}:${item.kind}:${item.title}`;
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return `hash-${Math.abs(hash).toString(16)}`;
 }

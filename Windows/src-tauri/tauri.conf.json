@@ -44,7 +44,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPLOCALDATA/native-assets/**"]
+        "scope": ["$APPLOCALDATA/native-assets/**", "$APPLOCALDATA/ClipDock/**"]
       }
     }
   },

@@ -14,8 +14,8 @@ pub use domain::{
     PageRequest, PayloadState, PendingImageCaptureResult, PendingImageCompletionResult,
     PinboardPage, PinboardSummary, PreferencesDocument, PreviewState, RecoverPendingImagesRequest,
     SourceAppPage, SourceAppSummary, SourceConfidence, SyncApplyEventsRequest, SyncApplyOutcome,
-    SyncApplySnapshotRequest, SyncEventRecord, SyncLocalPendingRequest, SyncProgress,
-    SyncSnapshotItemRecord, SyncSnapshotTombstoneRecord,
+    SyncApplySnapshotRequest, SyncEventRecord, SyncLocalPendingRequest, SyncPendingEvent,
+    SyncProgress, SyncSnapshotItemRecord, SyncSnapshotTombstoneRecord, SyncUploadedEvent,
 };
 pub use error::{CoreError, CoreErrorCode, Result};
 pub use storage::ClipboardCore;

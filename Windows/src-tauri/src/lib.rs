@@ -1,6 +1,10 @@
 mod clipboard_bridge;
+mod commands;
+mod core_state;
 mod native_assets;
+mod sync;
 
+use core_state::CoreState;
 use serde::Serialize;
 use std::{thread, time::Duration};
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize};
@@ -115,6 +119,7 @@ fn start_clipboard_event_monitor(app: tauri::AppHandle) {
                 Ok(Some(snapshot)) => {
                     if last_change_key.as_deref() != Some(snapshot.change_key()) {
                         last_change_key = Some(snapshot.change_key().to_string());
+                        clipboard_bridge::persist_snapshot(&app, &snapshot);
                         emit_clipboard_snapshot(&app, snapshot);
                     }
                 }
@@ -200,11 +205,37 @@ pub fn run() {
             clipboard_bridge::read_clipboard_snapshot,
             clipboard_bridge::write_clipboard_image,
             clipboard_bridge::write_clipboard_text,
-            native_assets::resolve_panel_native_assets
+            native_assets::resolve_panel_native_assets,
+            commands::core_info,
+            commands::list_clipboard_items,
+            commands::list_pinboards,
+            commands::create_pinboard,
+            commands::rename_pinboard,
+            commands::update_pinboard_color,
+            commands::delete_pinboard,
+            commands::set_item_pinboard_membership,
+            commands::delete_clipboard_item,
+            commands::record_clipboard_item_copied,
+            commands::clear_clipboard_items,
+            commands::capture_clipboard_text,
+            commands::capture_clipboard_image,
+            commands::get_preferences,
+            commands::update_preferences,
+            sync::sync_create_space,
+            sync::sync_join_space,
+            sync::sync_pull_now,
+            sync::sync_push_now,
+            sync::sync_status,
+            sync::sync_disable
         ])
         .setup(|app| {
+            let core_state = CoreState::initialize(app.handle())
+                .map_err(|message| tauri::Error::Anyhow(anyhow::anyhow!(message)))?;
+            app.manage(core_state);
+
             configure_initial_panel_window(app.handle())?;
             start_clipboard_event_monitor(app.handle().clone());
+            sync::start_sync_poll_loop(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
