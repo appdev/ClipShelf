@@ -10,7 +10,9 @@ use clipboard_core::{
 };
 use serde::Deserialize;
 
-mod p2p_node;
+// P2P blob transport lives in the shared `clipdock_p2p` crate so the Windows
+// client uses the exact same iroh-blobs transfer logic.
+use clipdock_p2p as p2p_node;
 
 #[swift_bridge::bridge]
 mod ffi {

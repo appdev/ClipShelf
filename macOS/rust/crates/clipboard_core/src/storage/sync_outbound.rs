@@ -8,13 +8,16 @@
 //! intentionally skipped until asset transfer is implemented — they cannot be
 //! reconstructed on the remote without the payload asset.
 
-use crate::domain::{SyncPendingEvent, SyncPendingImage, SyncUploadedEvent};
+use crate::domain::{
+    SyncPendingEvent, SyncPendingImage, SyncPendingPayload, SyncPendingThumbnail, SyncUploadedEvent,
+};
 use crate::error::Result;
 use crate::time::now_ms;
 use clipdock_sync_contract::BLAKE3_PREFIX;
 use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
+use super::support::insert_asset;
 use super::ClipboardCore;
 
 /// `sync_item_state.content_hash` is stored in bare (prefix-stripped) form,
@@ -59,7 +62,8 @@ impl ClipboardCore {
                     item.type,
                     item.primary_text,
                     item.summary,
-                    item.copy_count
+                    item.copy_count,
+                    state.last_uploaded_copy_count
                 FROM sync_item_state AS state
                 INNER JOIN clipboard_items AS item ON item.id = state.item_id
                 WHERE state.sync_id = ?1
@@ -70,6 +74,8 @@ impl ClipboardCore {
             )?;
 
             let rows = statement.query_map(params![sync_id], |row| {
+                let copy_count: i64 = row.get(6)?;
+                let last_uploaded: i64 = row.get(7)?;
                 Ok(PendingRow {
                     content_hash: row.get(0)?,
                     client_event_id: row.get::<_, Option<String>>(1)?,
@@ -77,7 +83,9 @@ impl ClipboardCore {
                     item_type: row.get(3)?,
                     primary_text: row.get::<_, Option<String>>(4)?,
                     summary: row.get(5)?,
-                    copy_count: row.get(6)?,
+                    // Only send the increment since the last upload so remote
+                    // copy counts do not drift on re-copy.
+                    copy_count_delta: (copy_count - last_uploaded).max(1),
                 })
             })?;
 
@@ -159,6 +167,195 @@ impl ClipboardCore {
         Ok(images)
     }
 
+    /// List synced remote images whose thumbnail is recorded but not yet
+    /// downloaded into a local `clipboard_assets` thumbnail row.
+    pub fn list_pending_thumbnail_downloads(
+        &mut self,
+        sync_id: impl AsRef<str>,
+    ) -> Result<Vec<SyncPendingThumbnail>> {
+        let sync_id = sync_id.as_ref().trim().to_string();
+        if sync_id.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let transaction = self.connection.transaction()?;
+        let mut pending = Vec::new();
+        {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT ra.content_hash, ra.asset_id, ra.mime_type,
+                       ra.source_payload_json, item.id
+                FROM sync_remote_assets AS ra
+                INNER JOIN clipboard_items AS item
+                    ON item.content_hash = ra.content_hash
+                WHERE ra.sync_id = ?1
+                    AND ra.kind = 'thumbnail'
+                    AND item.deleted_at_ms IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM clipboard_assets a
+                        WHERE a.item_id = item.id AND a.kind = 'thumbnail'
+                    )
+                "#,
+            )?;
+            let rows = statement.query_map(params![sync_id], |row| {
+                let content_hash: String = row.get(0)?;
+                let digest: String = row.get(1)?;
+                let mime_type: Option<String> = row.get(2)?;
+                let payload_json: String = row.get(3)?;
+                let item_id: String = row.get(4)?;
+                let dims: serde_json::Value =
+                    serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
+                Ok(SyncPendingThumbnail {
+                    item_id,
+                    content_hash,
+                    digest,
+                    mime_type: mime_type.unwrap_or_else(|| "image/webp".to_string()),
+                    width: dims
+                        .get("thumbnail_width")
+                        .and_then(|value| value.as_i64())
+                        .unwrap_or(0),
+                    height: dims
+                        .get("thumbnail_height")
+                        .and_then(|value| value.as_i64())
+                        .unwrap_or(0),
+                })
+            })?;
+            for row in rows {
+                pending.push(row?);
+            }
+        }
+        transaction.commit()?;
+        Ok(pending)
+    }
+
+    /// List synced remote images whose full-resolution payload has not been
+    /// fetched into a local `clipboard_assets` payload row.
+    pub fn list_pending_payload_downloads(
+        &mut self,
+        sync_id: impl AsRef<str>,
+    ) -> Result<Vec<SyncPendingPayload>> {
+        let sync_id = sync_id.as_ref().trim().to_string();
+        if sync_id.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let transaction = self.connection.transaction()?;
+        let mut pending = Vec::new();
+        {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT ra.content_hash, ra.asset_id, ra.mime_type,
+                       ra.source_payload_json, item.id
+                FROM sync_remote_assets AS ra
+                INNER JOIN clipboard_items AS item
+                    ON item.content_hash = ra.content_hash
+                WHERE ra.sync_id = ?1
+                    AND ra.kind = 'payload'
+                    AND item.type = 'image'
+                    AND item.deleted_at_ms IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM clipboard_assets a
+                        WHERE a.item_id = item.id AND a.kind = 'payload'
+                    )
+                "#,
+            )?;
+            let rows = statement.query_map(params![sync_id], |row| {
+                Ok(SyncPendingPayload {
+                    content_hash: row.get(0)?,
+                    asset_id: row.get(1)?,
+                    mime_type: row
+                        .get::<_, Option<String>>(2)?
+                        .unwrap_or_else(|| "image/png".to_string()),
+                    source_payload_json: row.get(3)?,
+                    item_id: row.get(4)?,
+                })
+            })?;
+            for row in rows {
+                pending.push(row?);
+            }
+        }
+        transaction.commit()?;
+        Ok(pending)
+    }
+
+    /// Attach a downloaded full-resolution payload to an image item and mark
+    /// the payload ready.
+    pub fn attach_remote_payload(
+        &mut self,
+        item_id: impl AsRef<str>,
+        relative_path: impl AsRef<str>,
+        mime_type: impl AsRef<str>,
+        byte_count: i64,
+        width: i64,
+        height: i64,
+        digest: impl AsRef<str>,
+    ) -> Result<()> {
+        let item_id = item_id.as_ref();
+        let now = now_ms();
+        let transaction = self.connection.transaction()?;
+        insert_asset(
+            &transaction,
+            item_id,
+            "payload",
+            mime_type.as_ref(),
+            relative_path.as_ref(),
+            byte_count,
+            Some(width).filter(|value| *value > 0),
+            Some(height).filter(|value| *value > 0),
+            digest.as_ref(),
+            now,
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE clipboard_items
+            SET payload_state = 'ready', updated_at_ms = ?2
+            WHERE id = ?1
+            "#,
+            params![item_id, now],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Attach a downloaded thumbnail file to an item as its preview asset and
+    /// mark the preview ready, so `list_items` surfaces it.
+    pub fn attach_remote_thumbnail(
+        &mut self,
+        item_id: impl AsRef<str>,
+        relative_path: impl AsRef<str>,
+        mime_type: impl AsRef<str>,
+        byte_count: i64,
+        width: i64,
+        height: i64,
+        digest: impl AsRef<str>,
+    ) -> Result<()> {
+        let item_id = item_id.as_ref();
+        let now = now_ms();
+        let transaction = self.connection.transaction()?;
+        insert_asset(
+            &transaction,
+            item_id,
+            "thumbnail",
+            mime_type.as_ref(),
+            relative_path.as_ref(),
+            byte_count,
+            Some(width).filter(|value| *value > 0),
+            Some(height).filter(|value| *value > 0),
+            digest.as_ref(),
+            now,
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE clipboard_items
+            SET preview_state = 'ready', updated_at_ms = ?2
+            WHERE id = ?1
+            "#,
+            params![item_id, now],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Transition acknowledged events from `local_pending_upload` to
     /// `synced_local`, recording the assigned server sequence. Returns the
     /// number of rows updated.
@@ -182,6 +379,10 @@ impl ClipboardCore {
                 SET provenance = 'synced_local',
                     local_status = 'uploaded',
                     last_server_seq = MAX(last_server_seq, ?3),
+                    last_uploaded_copy_count = COALESCE(
+                        (SELECT copy_count FROM clipboard_items WHERE id = sync_item_state.item_id),
+                        last_uploaded_copy_count
+                    ),
                     local_pending_event_id = NULL,
                     updated_at_ms = ?4
                 WHERE sync_id = ?1
@@ -205,7 +406,7 @@ struct PendingRow {
     item_type: String,
     primary_text: Option<String>,
     summary: String,
-    copy_count: i64,
+    copy_count_delta: i64,
 }
 
 fn build_pending_event(
@@ -260,7 +461,7 @@ fn build_pending_event(
                     content_hash: to_wire_hash(&row.content_hash),
                     item_type: "text".to_string(),
                     payload: json!({ "text": text, "summary": row.summary }),
-                    copy_count_delta: row.copy_count.max(1),
+                    copy_count_delta: row.copy_count_delta,
                     client_event_id,
                 }));
             };
@@ -282,7 +483,7 @@ fn build_pending_event(
         content_hash: to_wire_hash(&row.content_hash),
         item_type: row.item_type,
         payload,
-        copy_count_delta: row.copy_count.max(1),
+        copy_count_delta: row.copy_count_delta,
         client_event_id,
     }))
 }

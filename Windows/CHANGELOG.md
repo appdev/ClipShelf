@@ -25,8 +25,18 @@ syncing clipboard client built on the shared `clipboard_core` engine.
   storage schema, guaranteeing cross-platform parity.
 - Preferences (including sync credentials) persist in the core database.
 
+### Added (completing the sync feature set)
+- **Live UI refresh on sync** — the panel reloads automatically when remote
+  changes arrive, so synced items appear without a restart.
+- **Inbound thumbnail display** — thumbnails for synced remote images are
+  downloaded and shown as previews.
+- **Full-resolution P2P image transfer** — full images transfer directly
+  between devices over iroh-blobs. The transport now lives in the shared
+  `clipdock_p2p` crate used by both macOS and Windows, and devices register
+  their real iroh endpoint (reachable addresses) for discovery.
+- **Accurate copy counts** — outbound events send the per-upload increment, so
+  remote copy counts no longer drift on re-copy (schema v16).
+
 ### Known limitations
-- Full-resolution image payloads still require direct P2P transfer
-  (multi-machine testing pending); only thumbnails sync via the server.
-- Inbound thumbnail display wiring and copy-count delta de-duplication on
-  re-copy are follow-ups.
+- A clean Windows `.exe`/`.msi` must be produced on a Windows machine/CI
+  (cannot cross-build from macOS).

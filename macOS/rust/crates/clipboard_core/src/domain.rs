@@ -351,6 +351,31 @@ pub struct SyncUploadedEvent {
     pub server_seq: i64,
 }
 
+/// A synced remote image whose full-resolution payload has not been fetched
+/// over P2P yet. `source_payload_json` carries the event payload (including the
+/// blob ticket) the client uses to download it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncPendingPayload {
+    pub item_id: String,
+    pub content_hash: String,
+    pub asset_id: String,
+    pub mime_type: String,
+    pub source_payload_json: String,
+}
+
+/// A synced remote image whose thumbnail has not yet been downloaded locally.
+/// The client fetches `digest` from the server and calls
+/// `attach_remote_thumbnail` to make it display.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncPendingThumbnail {
+    pub item_id: String,
+    pub content_hash: String,
+    pub digest: String,
+    pub mime_type: String,
+    pub width: i64,
+    pub height: i64,
+}
+
 /// A locally captured image pending upload. Unlike text, image events require
 /// a thumbnail to be generated and uploaded before the event can be built, so
 /// these are surfaced separately with the payload asset location.

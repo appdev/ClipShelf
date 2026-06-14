@@ -18,6 +18,7 @@ arboard = { version = "3", default-features = true }
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clipboard_core = { path = "../../macOS/rust/crates/clipboard_core" }
+clipdock_p2p = { path = "../../shared/rust/clipdock_p2p" }
 clipdock_sync_contract = { path = "../../shared/rust/clipdock_sync_contract" }
 clipdock_thumbnail_codec = { path = "../../shared/rust/clipdock_thumbnail_codec" }
 futures-util = "0.3"

@@ -15,14 +15,14 @@ pub use domain::{
     PinboardPage, PinboardSummary, PreferencesDocument, PreviewState, RecoverPendingImagesRequest,
     SourceAppPage, SourceAppSummary, SourceConfidence, SyncApplyEventsRequest, SyncApplyOutcome,
     SyncApplySnapshotRequest, SyncEventRecord, SyncLocalPendingRequest, SyncPendingEvent,
-    SyncPendingImage, SyncProgress, SyncSnapshotItemRecord, SyncSnapshotTombstoneRecord,
-    SyncUploadedEvent,
+    SyncPendingImage, SyncPendingPayload, SyncPendingThumbnail, SyncProgress,
+    SyncSnapshotItemRecord, SyncSnapshotTombstoneRecord, SyncUploadedEvent,
 };
 pub use error::{CoreError, CoreErrorCode, Result};
 pub use storage::ClipboardCore;
 
 pub const DATABASE_FILE_NAME: &str = "clipboard.sqlite";
-pub const CURRENT_SCHEMA_VERSION: i64 = 15;
+pub const CURRENT_SCHEMA_VERSION: i64 = 16;
 pub const ACTIVE_SOURCE_ICON_HEADER_COLOR_CACHE_VERSION: i64 = 1;
 
 pub(crate) fn register_simple_tokenizer(connection: &rusqlite::Connection) -> Result<()> {

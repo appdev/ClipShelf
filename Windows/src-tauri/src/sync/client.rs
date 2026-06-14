@@ -240,8 +240,7 @@ impl SyncClient {
     }
 
     /// Download an asset's raw bytes by `blake3:`-prefixed digest. Used by the
-    /// inbound thumbnail/P2P fetch path (next milestone).
-    #[allow(dead_code)]
+    /// inbound thumbnail fetch path.
     pub async fn download_asset(&self, token: &str, digest: &str) -> Result<Vec<u8>, SyncError> {
         let response = self
             .http
@@ -280,6 +279,8 @@ impl SyncClient {
 #[derive(Serialize)]
 struct ReportEndpointBody<'a> {
     endpoint_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relay_url: Option<&'a str>,
     direct_addresses: Vec<String>,
 }
 
@@ -303,6 +304,8 @@ impl SyncClient {
         &self,
         token: &str,
         endpoint_id: &str,
+        relay_url: Option<&str>,
+        direct_addresses: Vec<String>,
     ) -> Result<(), SyncError> {
         let response = self
             .http
@@ -310,7 +313,8 @@ impl SyncClient {
             .bearer_auth(token)
             .json(&ReportEndpointBody {
                 endpoint_id,
-                direct_addresses: Vec::new(),
+                relay_url,
+                direct_addresses,
             })
             .send()
             .await

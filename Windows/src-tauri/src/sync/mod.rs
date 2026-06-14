@@ -10,6 +10,7 @@
 mod assets;
 mod client;
 mod p2p;
+mod p2p_transport;
 mod realtime;
 
 pub use realtime::start_realtime_loop;
@@ -23,12 +24,21 @@ use clipdock_sync_contract::{
 };
 use serde::Serialize;
 use serde_json::json;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::core_state::CoreState;
 use client::{OutgoingEvent, SyncClient, DEFAULT_PULL_LIMIT};
 
 const EVENT_TYPE_ITEM_UPSERT: &str = "item_upsert";
+
+/// Event emitted to the frontend after sync applies remote changes, so the
+/// panel can reload its list to show newly synced items.
+pub(crate) const EVENT_SYNC_APPLIED: &str = "clipdock://sync-applied";
+
+/// Notify the frontend that synced changes landed in the database.
+pub(crate) fn notify_sync_applied(app: &AppHandle) {
+    let _ = app.emit(EVENT_SYNC_APPLIED, ());
+}
 
 /// Interval between background sync pulls.
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
@@ -275,7 +285,7 @@ async fn push_pending_images(
             continue;
         }
 
-        let payload = json!({
+        let mut payload = json!({
             "summary": image.summary,
             THUMBNAIL_DIGEST_FIELD: thumbnail.digest,
             THUMBNAIL_MIME_TYPE_FIELD: thumbnail.mime_type,
@@ -283,6 +293,24 @@ async fn push_pending_images(
             THUMBNAIL_WIDTH_FIELD: thumbnail.width,
             THUMBNAIL_HEIGHT_FIELD: thumbnail.height,
         });
+
+        // Provide the full-resolution payload over P2P and embed the ticket so
+        // peers can fetch it directly (the server never relays full images).
+        if let Some(provided) = p2p_transport::provide_file(
+            state.root_dir().clone(),
+            image.payload_relative_path.clone(),
+        )
+        .await
+        {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert(
+                    "payload_asset_id".to_string(),
+                    json!(format!("blake3:{}", provided.blob_hash)),
+                );
+                object.insert("payload_blob_ticket".to_string(), json!(provided.blob_ticket));
+                object.insert("mime_type".to_string(), json!(image.mime_type));
+            }
+        }
 
         let event = OutgoingEvent {
             client_event_id: image.client_event_id.clone(),
@@ -322,6 +350,118 @@ async fn push_pending_images(
     }
 
     Ok(uploaded)
+}
+
+/// Download any thumbnails for newly synced remote images and attach them as
+/// preview assets so the panel can render them. Best-effort.
+async fn download_thumbnails(state: &CoreState, credentials: &SyncCredentials) {
+    let pending = match state.with_core(|core| {
+        core.list_pending_thumbnail_downloads(&credentials.sync_id)
+            .map_err(|error| error.to_string())
+    }) {
+        Ok(pending) => pending,
+        Err(message) => {
+            eprintln!("sync: list thumbnails failed: {message}");
+            return;
+        }
+    };
+    if pending.is_empty() {
+        return;
+    }
+
+    let root = state.root_dir().clone();
+    let client = SyncClient::new(&credentials.server_url);
+    for thumb in pending {
+        let bytes = match client.download_asset(&credentials.token, &thumb.digest).await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("sync: thumbnail download failed: {}", error.to_message());
+                continue;
+            }
+        };
+        let hex = thumb.digest.trim_start_matches("blake3:");
+        let relative = format!("assets/thumb-{hex}.webp");
+        let destination = root.join(&relative);
+        if let Some(parent) = destination.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(error) = std::fs::write(&destination, &bytes) {
+            eprintln!("sync: thumbnail write failed: {error}");
+            continue;
+        }
+        let byte_count = bytes.len() as i64;
+        if let Err(message) = state.with_core(|core| {
+            core.attach_remote_thumbnail(
+                &thumb.item_id,
+                &relative,
+                &thumb.mime_type,
+                byte_count,
+                thumb.width,
+                thumb.height,
+                &thumb.digest,
+            )
+            .map_err(|error| error.to_string())
+        }) {
+            eprintln!("sync: attach thumbnail failed: {message}");
+        }
+    }
+}
+
+/// Download full-resolution image payloads over P2P for synced remote images,
+/// using the blob ticket embedded in the event payload. Best-effort.
+async fn download_payloads(state: &CoreState, credentials: &SyncCredentials) {
+    let pending = match state.with_core(|core| {
+        core.list_pending_payload_downloads(&credentials.sync_id)
+            .map_err(|error| error.to_string())
+    }) {
+        Ok(pending) => pending,
+        Err(message) => {
+            eprintln!("sync: list payloads failed: {message}");
+            return;
+        }
+    };
+    if pending.is_empty() {
+        return;
+    }
+
+    let root = state.root_dir().clone();
+    for payload in pending {
+        let object: serde_json::Value =
+            serde_json::from_str(&payload.source_payload_json).unwrap_or(serde_json::Value::Null);
+        let Some(ticket) = object
+            .get("payload_blob_ticket")
+            .and_then(|value| value.as_str())
+        else {
+            continue;
+        };
+        let hex = payload.asset_id.trim_start_matches("blake3:");
+        let relative = format!("assets/payload-{hex}.bin");
+        if let Some(bytes) =
+            p2p_transport::download_file(root.clone(), ticket.to_string(), relative.clone()).await
+        {
+            if let Err(message) = state.with_core(|core| {
+                core.attach_remote_payload(
+                    &payload.item_id,
+                    &relative,
+                    &payload.mime_type,
+                    bytes,
+                    0,
+                    0,
+                    &payload.asset_id,
+                )
+                .map_err(|error| error.to_string())
+            }) {
+                eprintln!("sync: attach payload failed: {message}");
+            }
+        }
+    }
+}
+
+/// Fetch any remote assets (thumbnails over the server, full payloads over
+/// P2P) for newly synced items.
+async fn download_remote_assets(state: &CoreState, credentials: &SyncCredentials) {
+    download_thumbnails(state, credentials).await;
+    download_payloads(state, credentials).await;
 }
 
 fn current_cursor(state: &CoreState, sync_id: &str, device_id: &str) -> Result<i64, String> {
@@ -369,6 +509,7 @@ pub async fn sync_create_space(
 /// snapshot so the local history reflects the space immediately.
 #[tauri::command]
 pub async fn sync_join_space(
+    app: AppHandle,
     state: State<'_, CoreState>,
     server_url: String,
     pairing_code: String,
@@ -394,14 +535,22 @@ pub async fn sync_join_space(
         .await
         .map_err(|error| error.to_message())?;
 
-    apply_snapshot(&state, &response.sync_id, &response.device_id, snapshot)
+    let report = apply_snapshot(&state, &response.sync_id, &response.device_id, snapshot)?;
+    if let Some(credentials) = read_credentials(&state)? {
+        download_remote_assets(&state, &credentials).await;
+    }
+    notify_sync_applied(&app);
+    Ok(report)
 }
 
 /// Push pending local items, then pull and apply remote events. This is the
 /// full bidirectional sync step. Safe to call when sync is not configured
 /// (returns a no-op report).
 #[tauri::command]
-pub async fn sync_pull_now(state: State<'_, CoreState>) -> Result<SyncApplyReport, String> {
+pub async fn sync_pull_now(
+    app: AppHandle,
+    state: State<'_, CoreState>,
+) -> Result<SyncApplyReport, String> {
     let Some(credentials) = read_credentials(&state)? else {
         return Ok(SyncApplyReport {
             applied_events: 0,
@@ -422,13 +571,18 @@ pub async fn sync_pull_now(state: State<'_, CoreState>) -> Result<SyncApplyRepor
         .await
         .map_err(|error| error.to_message())?;
 
-    apply_events(
+    let report = apply_events(
         &state,
         &credentials.sync_id,
         &credentials.device_id,
         pulled.events,
         pulled.next_cursor,
-    )
+    )?;
+    if report.applied_events > 0 {
+        download_remote_assets(&state, &credentials).await;
+        notify_sync_applied(&app);
+    }
+    Ok(report)
 }
 
 /// Push only: upload locally captured items pending sync. Returns the number
@@ -492,13 +646,18 @@ pub fn trigger_sync_now(app: AppHandle) {
                     .pull_events(&credentials.token, cursor, DEFAULT_PULL_LIMIT)
                     .await
                 {
-                    let _ = apply_events(
+                    if let Ok(report) = apply_events(
                         &state,
                         &credentials.sync_id,
                         &credentials.device_id,
                         pulled.events,
                         pulled.next_cursor,
-                    );
+                    ) {
+                        if report.applied_events > 0 {
+                            download_remote_assets(&state, &credentials).await;
+                            notify_sync_applied(&app);
+                        }
+                    }
                 }
             }
             Err(message) => eprintln!("tray sync: cursor read failed: {message}"),
@@ -608,14 +767,19 @@ pub fn start_sync_poll_loop(app: AppHandle) {
                 .await
             {
                 Ok(pulled) => {
-                    if let Err(message) = apply_events(
+                    match apply_events(
                         &state,
                         &credentials.sync_id,
                         &credentials.device_id,
                         pulled.events,
                         pulled.next_cursor,
                     ) {
-                        eprintln!("sync poll: apply failed: {message}");
+                        Ok(report) if report.applied_events > 0 => {
+                            download_remote_assets(&state, &credentials).await;
+                            notify_sync_applied(&app);
+                        }
+                        Ok(_) => {}
+                        Err(message) => eprintln!("sync poll: apply failed: {message}"),
                     }
                 }
                 Err(error) => {

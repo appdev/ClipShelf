@@ -85,7 +85,17 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "history_hidden_pinboard_items",
         sql: HISTORY_HIDDEN_PINBOARD_ITEMS_SCHEMA,
     },
+    Migration {
+        version: 16,
+        name: "sync_item_uploaded_copy_count",
+        sql: SYNC_ITEM_UPLOADED_COPY_COUNT_SCHEMA,
+    },
 ];
+
+const SYNC_ITEM_UPLOADED_COPY_COUNT_SCHEMA: &str = r#"
+ALTER TABLE sync_item_state
+ADD COLUMN last_uploaded_copy_count INTEGER NOT NULL DEFAULT 0;
+"#;
 
 pub fn run_migrations(connection: &mut Connection) -> Result<()> {
     connection

@@ -80,7 +80,7 @@ pub fn start_realtime_loop(app: AppHandle) {
                 }
             };
 
-            match run_connection(&state, &credentials).await {
+            match run_connection(&app, &state, &credentials).await {
                 Ok(()) => {
                     // Clean close: reset backoff and retry promptly.
                     backoff = RECONNECT_MIN;
@@ -107,7 +107,11 @@ fn sync_enabled(state: &CoreState) -> bool {
         .unwrap_or(false)
 }
 
-async fn run_connection(state: &CoreState, credentials: &SyncCredentials) -> Result<(), String> {
+async fn run_connection(
+    app: &AppHandle,
+    state: &CoreState,
+    credentials: &SyncCredentials,
+) -> Result<(), String> {
     let cursor = current_cursor(state, &credentials.sync_id, &credentials.device_id)?;
     let ws_url = to_ws_url(&credentials.server_url);
     let url = format!("{ws_url}/v2/ws?cursor={cursor}&protocol_version=2");
@@ -138,10 +142,10 @@ async fn run_connection(state: &CoreState, credentials: &SyncCredentials) -> Res
                 match parsed {
                     ServerMessage::Hello { latest_seq, .. }
                     | ServerMessage::CatchupRequired { latest_seq } => {
-                        catch_up(state, credentials, latest_seq).await?;
+                        catch_up(app, state, credentials, latest_seq).await?;
                     }
                     ServerMessage::EventBatch { to_seq, events, .. } => {
-                        apply_batch(state, credentials, events, to_seq)?;
+                        apply_batch(app, state, credentials, events, to_seq).await?;
                     }
                     ServerMessage::Error { code, message } => {
                         return Err(format!("server error {code}: {message}"));
@@ -162,7 +166,8 @@ async fn run_connection(state: &CoreState, credentials: &SyncCredentials) -> Res
 }
 
 /// Apply a live event batch if it advances past the local cursor.
-fn apply_batch(
+async fn apply_batch(
+    app: &AppHandle,
     state: &CoreState,
     credentials: &SyncCredentials,
     events: Vec<SyncEventRecord>,
@@ -172,18 +177,23 @@ fn apply_batch(
     if to_seq <= cursor {
         return Ok(());
     }
-    apply_events(
+    let report = apply_events(
         state,
         &credentials.sync_id,
         &credentials.device_id,
         events,
         to_seq,
-    )
-    .map(|_| ())
+    )?;
+    if report.applied_events > 0 {
+        super::download_remote_assets(state, credentials).await;
+        super::notify_sync_applied(app);
+    }
+    Ok(())
 }
 
 /// Catch up to `latest_seq` by pulling over HTTP when the cursor is behind.
 async fn catch_up(
+    app: &AppHandle,
     state: &CoreState,
     credentials: &SyncCredentials,
     latest_seq: i64,
@@ -194,6 +204,7 @@ async fn catch_up(
     }
 
     let client = SyncClient::new(&credentials.server_url);
+    let mut applied_any = false;
     loop {
         let pulled = client
             .pull_events(&credentials.token, cursor, DEFAULT_PULL_LIMIT)
@@ -201,17 +212,22 @@ async fn catch_up(
             .map_err(|error| error.to_message())?;
         let next_cursor = pulled.next_cursor;
         let empty = pulled.events.is_empty();
-        apply_events(
+        let report = apply_events(
             state,
             &credentials.sync_id,
             &credentials.device_id,
             pulled.events,
             next_cursor,
         )?;
+        applied_any = applied_any || report.applied_events > 0;
         cursor = next_cursor;
         if empty || cursor >= latest_seq {
             break;
         }
+    }
+    if applied_any {
+        super::download_remote_assets(state, credentials).await;
+        super::notify_sync_applied(app);
     }
     Ok(())
 }

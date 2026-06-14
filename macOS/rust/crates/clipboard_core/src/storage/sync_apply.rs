@@ -724,6 +724,9 @@ fn upsert_remote_item(
     if let Some(asset) = mapping.asset.as_ref() {
         upsert_remote_asset(transaction, sync_id, content_hash, asset, event_time_ms)?;
     }
+    if mapping.item_type == ClipboardItemType::Image {
+        upsert_remote_thumbnail(transaction, sync_id, content_hash, object, event_time_ms)?;
+    }
     update_search_index(
         transaction,
         &item_id,
@@ -1318,6 +1321,54 @@ fn replace_remote_file_item(
             file.height,
             file.content_type,
             now
+        ],
+    )?;
+    Ok(())
+}
+
+/// Record the remote thumbnail digest for an applied image so the client can
+/// download it later (see `list_pending_thumbnail_downloads`). Stored in
+/// `sync_remote_assets` with kind 'thumbnail'; the width/height are kept in the
+/// payload json for reconstruction.
+fn upsert_remote_thumbnail(
+    transaction: &Transaction<'_>,
+    sync_id: &str,
+    content_hash: &str,
+    object: &Map<String, Value>,
+    event_time_ms: i64,
+) -> Result<()> {
+    let Some(meta) = ThumbnailMetadata::parse_shape_strict(Some(ITEM_TYPE_IMAGE), object)
+        .map_err(|error| sync_error(CoreErrorCode::SyncInvalidEvent, error.code()))?
+    else {
+        return Ok(());
+    };
+    let source_payload_json = serde_json::json!({
+        "thumbnail_width": meta.width,
+        "thumbnail_height": meta.height,
+    })
+    .to_string();
+    transaction.execute(
+        r#"
+        INSERT INTO sync_remote_assets (
+            sync_id, content_hash, asset_id, kind, mime_type,
+            byte_count, file_name, source_payload_json, updated_at_ms
+        )
+        VALUES (?1, ?2, ?3, 'thumbnail', ?4, ?5, NULL, ?6, ?7)
+        ON CONFLICT(sync_id, content_hash, kind) DO UPDATE SET
+            asset_id = excluded.asset_id,
+            mime_type = excluded.mime_type,
+            byte_count = excluded.byte_count,
+            source_payload_json = excluded.source_payload_json,
+            updated_at_ms = excluded.updated_at_ms
+        "#,
+        params![
+            sync_id,
+            content_hash,
+            meta.digest,
+            meta.mime_type,
+            meta.byte_count,
+            source_payload_json,
+            event_time_ms
         ],
     )?;
     Ok(())

@@ -95,6 +95,51 @@ fn acknowledged_event_leaves_the_pending_set() {
 }
 
 #[test]
+fn copy_count_delta_does_not_drift_on_recopy() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut core = ClipboardCore::open(dir.path()).expect("open core");
+
+    // First capture + upload: delta should be the full count (1).
+    let (hash, item_id) = capture(&mut core, "drift check");
+    let wire = format!("blake3:{hash}");
+    core.mark_sync_local_pending(SyncLocalPendingRequest {
+        sync_id: SYNC_ID.to_string(),
+        content_hash: wire.clone(),
+        item_id: Some(item_id),
+        client_event_id: "d-1".to_string(),
+    })
+    .expect("mark pending");
+    let first = core.list_pending_sync_events(SYNC_ID).expect("list");
+    assert_eq!(first[0].copy_count_delta, 1);
+    core.mark_sync_events_uploaded(
+        SYNC_ID,
+        &[SyncUploadedEvent {
+            content_hash: wire.clone(),
+            server_seq: 1,
+        }],
+    )
+    .expect("ack");
+
+    // Re-copy the same content (copy_count -> 2), re-mark pending.
+    let (hash2, item_id2) = capture(&mut core, "drift check");
+    assert_eq!(hash2, hash, "same content => same hash");
+    core.mark_sync_local_pending(SyncLocalPendingRequest {
+        sync_id: SYNC_ID.to_string(),
+        content_hash: wire.clone(),
+        item_id: Some(item_id2),
+        client_event_id: "d-2".to_string(),
+    })
+    .expect("mark pending again");
+
+    // Delta must be the increment (2 - 1 = 1), not the full count (2).
+    let second = core.list_pending_sync_events(SYNC_ID).expect("list");
+    assert_eq!(
+        second[0].copy_count_delta, 1,
+        "re-copy should send the increment, not the full count"
+    );
+}
+
+#[test]
 fn image_captures_are_not_listed_for_outbound() {
     // Images require asset transfer, so they must not appear as pending text
     // events even if marked pending.

@@ -194,6 +194,21 @@ function PanelApp() {
         else unlisteners.push(unlisten);
       })
       .catch((error) => console.error("Failed to listen copy-diagnostics", error));
+    listen("clipdock://sync-applied", () => {
+      // Remote changes landed in the database; reload to show synced items.
+      loadStoredPanelItems()
+        .then((storedItems) => {
+          if (!cancelled && storedItems.length > 0) {
+            setItems(storedItems);
+          }
+        })
+        .catch((error) => console.error("Failed to reload after sync", error));
+    })
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else unlisteners.push(unlisten);
+      })
+      .catch((error) => console.error("Failed to listen sync-applied", error));
     return () => {
       cancelled = true;
       unlisteners.forEach((unlisten) => unlisten());
