@@ -8,7 +8,7 @@
 //! intentionally skipped until asset transfer is implemented — they cannot be
 //! reconstructed on the remote without the payload asset.
 
-use crate::domain::{SyncPendingEvent, SyncUploadedEvent};
+use crate::domain::{SyncPendingEvent, SyncPendingImage, SyncUploadedEvent};
 use crate::error::Result;
 use crate::time::now_ms;
 use clipdock_sync_contract::BLAKE3_PREFIX;
@@ -90,6 +90,73 @@ impl ClipboardCore {
         }
         transaction.commit()?;
         Ok(events)
+    }
+
+    /// List image items marked `local_pending_upload` together with their
+    /// payload asset location, so the caller can generate and upload a
+    /// thumbnail before constructing the image upsert event.
+    pub fn list_pending_image_sync_events(
+        &mut self,
+        sync_id: impl AsRef<str>,
+    ) -> Result<Vec<SyncPendingImage>> {
+        let sync_id = sync_id.as_ref().trim().to_string();
+        if sync_id.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let transaction = self.connection.transaction()?;
+        let mut images = Vec::new();
+        {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT
+                    state.content_hash,
+                    state.local_pending_event_id,
+                    item.id,
+                    item.summary,
+                    asset.relative_path,
+                    asset.width,
+                    asset.height,
+                    asset.byte_count,
+                    asset.mime_type
+                FROM sync_item_state AS state
+                INNER JOIN clipboard_items AS item ON item.id = state.item_id
+                INNER JOIN clipboard_assets AS asset
+                    ON asset.item_id = item.id AND asset.kind = 'payload'
+                WHERE state.sync_id = ?1
+                    AND state.provenance = 'local_pending_upload'
+                    AND item.type = 'image'
+                    AND item.deleted_at_ms IS NULL
+                ORDER BY item.last_copied_at_ms ASC
+                "#,
+            )?;
+
+            let rows = statement.query_map(params![sync_id], |row| {
+                let content_hash: String = row.get(0)?;
+                let client_event_id: Option<String> = row.get(1)?;
+                Ok(SyncPendingImage {
+                    content_hash: to_wire_hash(&content_hash),
+                    item_id: row.get(2)?,
+                    summary: row.get(3)?,
+                    payload_relative_path: row.get(4)?,
+                    width: row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    height: row.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                    byte_count: row.get(7)?,
+                    mime_type: row
+                        .get::<_, Option<String>>(8)?
+                        .unwrap_or_else(|| "image/png".to_string()),
+                    client_event_id: client_event_id
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| format!("local-{content_hash}")),
+                })
+            })?;
+
+            for row in rows {
+                images.push(row?);
+            }
+        }
+        transaction.commit()?;
+        Ok(images)
     }
 
     /// Transition acknowledged events from `local_pending_upload` to

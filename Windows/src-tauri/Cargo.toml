@@ -1,6 +1,6 @@
 [package]
 name = "clipdock_windows_panel"
-version = "0.1.0"
+version = "0.2.0"
 description = "ClipDock cross-platform panel shell"
 authors = ["ClipDock"]
 edition = "2021"
@@ -20,6 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clipboard_core = { path = "../../macOS/rust/crates/clipboard_core" }
 clipdock_sync_contract = { path = "../../shared/rust/clipdock_sync_contract" }
 clipdock_thumbnail_codec = { path = "../../shared/rust/clipdock_thumbnail_codec" }
+futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
 plist = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -29,6 +30,7 @@ serde_json = "1"
 sha2 = "0.10"
 tauri = { version = "2", features = ["macos-private-api", "protocol-asset", "tray-icon"] }
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 url = "2"
 
 [dev-dependencies]

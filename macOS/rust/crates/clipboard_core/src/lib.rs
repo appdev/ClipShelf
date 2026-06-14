@@ -15,7 +15,8 @@ pub use domain::{
     PinboardPage, PinboardSummary, PreferencesDocument, PreviewState, RecoverPendingImagesRequest,
     SourceAppPage, SourceAppSummary, SourceConfidence, SyncApplyEventsRequest, SyncApplyOutcome,
     SyncApplySnapshotRequest, SyncEventRecord, SyncLocalPendingRequest, SyncPendingEvent,
-    SyncProgress, SyncSnapshotItemRecord, SyncSnapshotTombstoneRecord, SyncUploadedEvent,
+    SyncPendingImage, SyncProgress, SyncSnapshotItemRecord, SyncSnapshotTombstoneRecord,
+    SyncUploadedEvent,
 };
 pub use error::{CoreError, CoreErrorCode, Result};
 pub use storage::ClipboardCore;

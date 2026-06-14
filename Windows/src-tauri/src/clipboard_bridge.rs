@@ -191,9 +191,23 @@ fn persist_image_snapshot(state: &CoreState, snapshot: &ClipboardSnapshot) -> Re
     };
 
     state.with_core(|core| {
-        core.capture_image(request)
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+        let result = core
+            .capture_image(request)
+            .map_err(|error| error.to_string())?;
+
+        let prefs = core.get_preferences().map_err(|error| error.to_string())?;
+        if prefs.sync.enabled {
+            if let Some(sync_id) = prefs.sync.sync_id.filter(|value| !value.is_empty()) {
+                core.mark_sync_local_pending(SyncLocalPendingRequest {
+                    sync_id,
+                    content_hash: format!("blake3:{}", result.content_hash),
+                    item_id: Some(result.item_id.clone()),
+                    client_event_id: next_client_event_id(),
+                })
+                .map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
     })
 }
 

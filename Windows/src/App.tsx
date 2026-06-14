@@ -176,6 +176,32 @@ function PanelApp() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+    listen("clipdock://open-preferences", () => {
+      void openPreferencesWindow();
+    })
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else unlisteners.push(unlisten);
+      })
+      .catch((error) => console.error("Failed to listen open-preferences", error));
+    listen("clipdock://copy-diagnostics", () => {
+      copyClipboardDiagnostics();
+    })
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else unlisteners.push(unlisten);
+      })
+      .catch((error) => console.error("Failed to listen copy-diagnostics", error));
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     const clipboardHandler = (snapshot: ClipboardSnapshot) => {
       captureClipboardSnapshot(snapshot);
     };

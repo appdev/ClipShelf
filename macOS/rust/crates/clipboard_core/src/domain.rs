@@ -351,6 +351,22 @@ pub struct SyncUploadedEvent {
     pub server_seq: i64,
 }
 
+/// A locally captured image pending upload. Unlike text, image events require
+/// a thumbnail to be generated and uploaded before the event can be built, so
+/// these are surfaced separately with the payload asset location.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncPendingImage {
+    pub content_hash: String,
+    pub item_id: String,
+    pub summary: String,
+    pub payload_relative_path: String,
+    pub width: i64,
+    pub height: i64,
+    pub byte_count: i64,
+    pub mime_type: String,
+    pub client_event_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinboardSummary {
     pub id: String,

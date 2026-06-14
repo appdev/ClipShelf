@@ -7,12 +7,22 @@
 //! `clipboard_core`, so conflict resolution and content hashing stay identical
 //! across platforms.
 
+mod assets;
 mod client;
+mod p2p;
+mod realtime;
+
+pub use realtime::start_realtime_loop;
 
 use std::time::Duration;
 
 use clipboard_core::{SyncApplyEventsRequest, SyncApplySnapshotRequest, SyncUploadedEvent};
+use clipdock_sync_contract::{
+    ASSET_KIND_THUMBNAIL, THUMBNAIL_BYTE_COUNT_FIELD, THUMBNAIL_DIGEST_FIELD,
+    THUMBNAIL_HEIGHT_FIELD, THUMBNAIL_MIME_TYPE_FIELD, THUMBNAIL_WIDTH_FIELD,
+};
 use serde::Serialize;
+use serde_json::json;
 use tauri::{AppHandle, Manager, State};
 
 use crate::core_state::CoreState;
@@ -216,6 +226,104 @@ async fn push_pending(state: &CoreState, credentials: &SyncCredentials) -> Resul
     Ok(count)
 }
 
+/// Upload pending image captures: generate a WebP thumbnail, push it to the
+/// server's asset store, then emit an image upsert event referencing it. The
+/// full-resolution payload transfers over P2P (separate milestone); the
+/// thumbnail alone lets remote devices render a preview. Returns the count
+/// uploaded.
+async fn push_pending_images(
+    state: &CoreState,
+    credentials: &SyncCredentials,
+) -> Result<usize, String> {
+    let pending = state.with_core(|core| {
+        core.list_pending_image_sync_events(&credentials.sync_id)
+            .map_err(|error| error.to_string())
+    })?;
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    let root_dir = state.root_dir().clone();
+    let client = SyncClient::new(&credentials.server_url);
+    let mut uploaded = 0_usize;
+
+    for image in pending {
+        let payload_path = root_dir.join(&image.payload_relative_path);
+        let thumbnail = match assets::generate_thumbnail(&payload_path) {
+            Ok(Some(thumbnail)) => thumbnail,
+            Ok(None) => continue,
+            Err(message) => {
+                eprintln!("sync image: thumbnail generation failed: {message}");
+                continue;
+            }
+        };
+
+        let byte_count = thumbnail.bytes.len() as i64;
+        if let Err(message) = client
+            .upload_asset(
+                &credentials.token,
+                &thumbnail.digest,
+                ASSET_KIND_THUMBNAIL,
+                thumbnail.mime_type,
+                thumbnail.width,
+                thumbnail.height,
+                thumbnail.bytes,
+            )
+            .await
+        {
+            eprintln!("sync image: thumbnail upload failed: {}", message.to_message());
+            continue;
+        }
+
+        let payload = json!({
+            "summary": image.summary,
+            THUMBNAIL_DIGEST_FIELD: thumbnail.digest,
+            THUMBNAIL_MIME_TYPE_FIELD: thumbnail.mime_type,
+            THUMBNAIL_BYTE_COUNT_FIELD: byte_count,
+            THUMBNAIL_WIDTH_FIELD: thumbnail.width,
+            THUMBNAIL_HEIGHT_FIELD: thumbnail.height,
+        });
+
+        let event = OutgoingEvent {
+            client_event_id: image.client_event_id.clone(),
+            event_type: EVENT_TYPE_ITEM_UPSERT.to_string(),
+            content_hash: image.content_hash.clone(),
+            item_type: Some("image".to_string()),
+            payload: Some(payload),
+            copy_count_delta: Some(1),
+        };
+
+        let response = match client.push_events(&credentials.token, vec![event]).await {
+            Ok(response) => response,
+            Err(message) => {
+                eprintln!("sync image: push failed: {}", message.to_message());
+                continue;
+            }
+        };
+
+        if let Some(acked) = response
+            .events
+            .iter()
+            .find(|acked| acked.client_event_id == image.client_event_id)
+        {
+            state.with_core(|core| {
+                core.mark_sync_events_uploaded(
+                    &credentials.sync_id,
+                    &[SyncUploadedEvent {
+                        content_hash: image.content_hash.clone(),
+                        server_seq: acked.server_seq,
+                    }],
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            })?;
+            uploaded += 1;
+        }
+    }
+
+    Ok(uploaded)
+}
+
 fn current_cursor(state: &CoreState, sync_id: &str, device_id: &str) -> Result<i64, String> {
     state.with_core(|core| {
         core.get_sync_progress(sync_id, device_id)
@@ -305,6 +413,7 @@ pub async fn sync_pull_now(state: State<'_, CoreState>) -> Result<SyncApplyRepor
     // Outbound first so freshly captured items reach the server before we
     // reconcile the cursor.
     push_pending(&state, &credentials).await?;
+    push_pending_images(&state, &credentials).await?;
 
     let cursor = current_cursor(&state, &credentials.sync_id, &credentials.device_id)?;
     let client = SyncClient::new(&credentials.server_url);
@@ -359,6 +468,73 @@ pub fn sync_status(state: State<'_, CoreState>) -> Result<SyncStatus, String> {
     })
 }
 
+/// Fire a one-shot bidirectional sync in the background (used by the tray
+/// menu). Errors are logged; safe to call when sync is unconfigured.
+pub fn trigger_sync_now(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let Some(state) = app.try_state::<CoreState>() else {
+            return;
+        };
+        let credentials = match read_credentials(&state) {
+            Ok(Some(credentials)) => credentials,
+            _ => return,
+        };
+        if let Err(message) = push_pending(&state, &credentials).await {
+            eprintln!("tray sync: push failed: {message}");
+        }
+        if let Err(message) = push_pending_images(&state, &credentials).await {
+            eprintln!("tray sync: image push failed: {message}");
+        }
+        match current_cursor(&state, &credentials.sync_id, &credentials.device_id) {
+            Ok(cursor) => {
+                let client = SyncClient::new(&credentials.server_url);
+                if let Ok(pulled) = client
+                    .pull_events(&credentials.token, cursor, DEFAULT_PULL_LIMIT)
+                    .await
+                {
+                    let _ = apply_events(
+                        &state,
+                        &credentials.sync_id,
+                        &credentials.device_id,
+                        pulled.events,
+                        pulled.next_cursor,
+                    );
+                }
+            }
+            Err(message) => eprintln!("tray sync: cursor read failed: {message}"),
+        }
+    });
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDevice {
+    pub device_id: String,
+    pub device_name: String,
+}
+
+/// List devices that have registered a P2P endpoint in the sync space. Returns
+/// an empty list when sync is not configured.
+#[tauri::command]
+pub async fn sync_list_devices(state: State<'_, CoreState>) -> Result<Vec<SyncDevice>, String> {
+    let Some(credentials) = read_credentials(&state)? else {
+        return Ok(Vec::new());
+    };
+    let client = SyncClient::new(&credentials.server_url);
+    let response = client
+        .list_p2p_devices(&credentials.token)
+        .await
+        .map_err(|error| error.to_message())?;
+    Ok(response
+        .devices
+        .into_iter()
+        .map(|device| SyncDevice {
+            device_id: device.device_id,
+            device_name: device.device_name,
+        })
+        .collect())
+}
+
 /// Disable sync without discarding credentials (re-enable resumes from cursor).
 #[tauri::command]
 pub fn sync_disable(state: State<'_, CoreState>) -> Result<(), String> {
@@ -404,9 +580,17 @@ pub fn start_sync_poll_loop(app: AppHandle) {
                 continue;
             }
 
-            // Outbound: upload pending local captures.
+            // Outbound: upload pending local captures (text then images).
             if let Err(message) = push_pending(&state, &credentials).await {
                 eprintln!("sync poll: push failed: {message}");
+            }
+            if let Err(message) = push_pending_images(&state, &credentials).await {
+                eprintln!("sync poll: image push failed: {message}");
+            }
+
+            // P2P discovery: refresh this device's endpoint registration.
+            if let Err(message) = p2p::announce_endpoint(&state, &credentials).await {
+                eprintln!("sync poll: p2p announce failed: {message}");
             }
 
             let cursor = match current_cursor(&state, &credentials.sync_id, &credentials.device_id)

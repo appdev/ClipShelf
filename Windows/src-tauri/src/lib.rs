@@ -3,6 +3,7 @@ mod commands;
 mod core_state;
 mod native_assets;
 mod sync;
+mod tray;
 
 use core_state::CoreState;
 use serde::Serialize;
@@ -226,6 +227,7 @@ pub fn run() {
             sync::sync_pull_now,
             sync::sync_push_now,
             sync::sync_status,
+            sync::sync_list_devices,
             sync::sync_disable
         ])
         .setup(|app| {
@@ -233,9 +235,11 @@ pub fn run() {
                 .map_err(|message| tauri::Error::Anyhow(anyhow::anyhow!(message)))?;
             app.manage(core_state);
 
+            tray::setup_tray(app)?;
             configure_initial_panel_window(app.handle())?;
             start_clipboard_event_monitor(app.handle().clone());
             sync::start_sync_poll_loop(app.handle().clone());
+            sync::start_realtime_loop(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
