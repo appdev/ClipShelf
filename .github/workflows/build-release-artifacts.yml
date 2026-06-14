@@ -15,6 +15,7 @@ name: Build release artifacts
         options:
           - all
           - macos
+          - windows
       publish_release:
         description: "Create or update the GitHub Release"
         required: true
@@ -172,6 +173,119 @@ jobs:
           path: |
             .codex/artifacts/release/${{ needs.metadata.outputs.version }}/macos/ClipDock-${{ needs.metadata.outputs.version }}-*.dmg
             .codex/artifacts/release/${{ needs.metadata.outputs.version }}/macos/ClipDock-release-manifest.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  build-windows-app:
+    name: Build Windows app installers
+    if: ${{ inputs.artifact_scope == 'all' || inputs.artifact_scope == 'windows' }}
+    needs: metadata
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: Windows/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Windows/src-tauri
+
+      - name: Print Windows toolchain
+        working-directory: Windows
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          rustc -vV
+          cargo --version
+
+      - name: Resolve Windows app version
+        id: winver
+        working-directory: Windows
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install frontend dependencies
+        working-directory: Windows
+        run: npm ci
+
+      - name: Build Tauri Windows installers
+        working-directory: Windows
+        run: npm run tauri:build -- --bundles nsis,msi
+
+      - name: Collect Windows release artifacts
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+          WIN_VERSION: ${{ steps.winver.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          artifact_root="$PWD/${{ needs.metadata.outputs.artifact_path }}/windows"
+          bundle_dir="Windows/src-tauri/target/release/bundle"
+
+          mkdir -p "$artifact_root"
+          rm -f "$artifact_root"/*.msi "$artifact_root"/*.exe \
+                "$artifact_root"/ClipDock-Windows-release-manifest.txt
+
+          msi_source="$(find "$bundle_dir/msi" -maxdepth 1 -type f -name '*.msi' | sort | head -n 1 || true)"
+          exe_source="$(find "$bundle_dir/nsis" -maxdepth 1 -type f -name '*.exe' | sort | head -n 1 || true)"
+
+          if [[ -z "$msi_source" && -z "$exe_source" ]]; then
+            echo "no Windows installers were produced" >&2
+            find "$bundle_dir" -type f || true
+            exit 1
+          fi
+
+          manifest_path="$artifact_root/ClipDock-Windows-release-manifest.txt"
+          {
+            printf 'name=ClipDock\n'
+            printf 'platform=windows\n'
+            printf 'identifier=com.apkdv.clipdock.panel\n'
+            printf 'app_version=%s\n' "$WIN_VERSION"
+            printf 'release_version=%s\n' "$RELEASE_VERSION"
+          } > "$manifest_path"
+
+          if [[ -n "$msi_source" ]]; then
+            msi_path="$artifact_root/ClipDock-$WIN_VERSION-windows-x64.msi"
+            cp "$msi_source" "$msi_path"
+            printf 'msi=%s\n' "$msi_path" >> "$manifest_path"
+          fi
+          if [[ -n "$exe_source" ]]; then
+            exe_path="$artifact_root/ClipDock-$WIN_VERSION-windows-x64-setup.exe"
+            cp "$exe_source" "$exe_path"
+            printf 'nsis=%s\n' "$exe_path" >> "$manifest_path"
+          fi
+
+          cat "$manifest_path"
+
+      - name: Upload Windows workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ClipDock-${{ needs.metadata.outputs.version }}-windows
+          path: |
+            .codex/artifacts/release/${{ needs.metadata.outputs.version }}/windows/*.msi
+            .codex/artifacts/release/${{ needs.metadata.outputs.version }}/windows/*.exe
+            .codex/artifacts/release/${{ needs.metadata.outputs.version }}/windows/ClipDock-Windows-release-manifest.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -374,6 +488,7 @@ jobs:
       - metadata
       - build-android-app
       - build-macos-app
+      - build-windows-app
       - build-server
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -448,6 +563,8 @@ jobs:
           files: |
             release-artifacts/**/*.apk
             release-artifacts/**/*.dmg
+            release-artifacts/**/*.msi
+            release-artifacts/**/*-setup.exe
             release-artifacts/**/*.tar.gz
 
   publish-macos-release:
@@ -529,4 +646,86 @@ jobs:
           overwrite_files: true
           files: |
             release-artifacts/**/*.dmg
+            release-artifacts/**/*release-manifest.txt
+
+  publish-windows-release:
+    name: Publish Windows GitHub Release
+    if: ${{ inputs.publish_release && inputs.artifact_scope == 'windows' }}
+    needs:
+      - metadata
+      - build-windows-app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: release-artifacts
+
+      - name: Generate release notes from commits
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+          RELEASE_BUILD: ${{ needs.metadata.outputs.build }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+          RELEASE_NOTES: release-notes.md
+        run: |
+          set -euo pipefail
+
+          target_commit="$GITHUB_SHA"
+          if git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null; then
+            target_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+            previous_tag="$(git describe --tags --abbrev=0 "$RELEASE_TAG^" 2>/dev/null || true)"
+          else
+            previous_tag="$(git describe --tags --abbrev=0 "$target_commit" 2>/dev/null || true)"
+          fi
+
+          if [[ -n "$previous_tag" ]]; then
+            commit_range="$previous_tag..$target_commit"
+          else
+            commit_range="$target_commit"
+          fi
+
+          {
+            echo "## ClipDock $RELEASE_VERSION"
+            echo
+            echo "- Build: $RELEASE_BUILD"
+            echo "- Commit: $target_commit"
+            echo "- Scope: Windows"
+            if [[ -n "$previous_tag" ]]; then
+              echo "- Changes since: $previous_tag"
+            fi
+            echo
+            echo "## Commits"
+            echo
+          } > "$RELEASE_NOTES"
+
+          commit_count="$(git rev-list --count "$commit_range" 2>/dev/null || true)"
+          if [[ "${commit_count:-0}" =~ ^[0-9]+$ && "$commit_count" -gt 0 ]]; then
+            git log --format="- %s (%h)" --reverse "$commit_range" >> "$RELEASE_NOTES"
+          else
+            git log -1 --format="- %s (%h)" "$target_commit" >> "$RELEASE_NOTES"
+          fi
+
+          cat "$RELEASE_NOTES"
+
+      - name: Publish Windows GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ClipDock ${{ needs.metadata.outputs.version }}
+          body_path: release-notes.md
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: |
+            release-artifacts/**/*.msi
+            release-artifacts/**/*-setup.exe
             release-artifacts/**/*release-manifest.txt
