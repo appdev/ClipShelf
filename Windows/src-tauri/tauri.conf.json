@@ -49,6 +49,6 @@
     "targets": ["nsis", "msi", "app", "dmg"],
     "category": "Productivity",
     "shortDescription": "ClipDock clipboard panel with cross-device sync",
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png", "icons/icon.ico"]
   }
 }
