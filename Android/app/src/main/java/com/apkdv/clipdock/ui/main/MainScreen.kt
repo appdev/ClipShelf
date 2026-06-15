@@ -327,9 +327,14 @@ internal fun ClipDockApp(
           SettingsOverviewPage(
             state = state,
             onSyncNow = onSyncNow,
+            onP2pEnabledChange = onP2pEnabledChange,
             onWifiOnlyChange = onWifiOnlyChange,
             onOverlayEnabledChange = onOverlayEnabledChange,
             onEncryptionEnabledChange = onEncryptionEnabledChange,
+            onServerUrlChange = onServerUrlChange,
+            onCheckHealth = onCheckHealth,
+            onCreateSyncSpace = onCreateSyncSpace,
+            onJoinSyncSpace = onJoinSyncSpace,
             onOpenSettingsDetail = onOpenSettingsDetail,
           )
       }
@@ -3147,9 +3152,14 @@ private fun FileRow(
 private fun SettingsOverviewPage(
   state: ClipDockUiState,
   onSyncNow: () -> Unit,
+  onP2pEnabledChange: (Boolean) -> Unit,
   onWifiOnlyChange: (Boolean) -> Unit,
   onOverlayEnabledChange: (Boolean) -> Unit,
   onEncryptionEnabledChange: (Boolean) -> Unit,
+  onServerUrlChange: (String) -> Unit,
+  onCheckHealth: () -> Unit,
+  onCreateSyncSpace: () -> Unit,
+  onJoinSyncSpace: (String) -> Unit,
   onOpenSettingsDetail: (SettingsDetailDestination) -> Unit,
 ) {
   val context = LocalContext.current
@@ -3159,6 +3169,7 @@ private fun SettingsOverviewPage(
   val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
   val batteryIgnored = powerManager.isIgnoringBatteryOptimizations(context.packageName)
   val keepAliveMissingCount = listOf(overlayGranted, notificationGranted, batteryIgnored).count { !it }
+  var syncConfigExpanded by remember { mutableStateOf(false) }
   LazyColumn(contentPadding = PaddingValues(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
     item {
       ClipDockScreenHeader(
@@ -3172,13 +3183,41 @@ private fun SettingsOverviewPage(
     item { SettingsSectionTitle("同步") }
     item {
       SettingGroup {
-        SwitchSettingRow(ClipDockIconKind.Cloud, "自动同步", "文本、链接、图片缩略图保持同步", checked = state.tokenPresent, onCheckedChange = {}, tone = ClipDockTone.Green)
+        SwitchSettingRow(
+          ClipDockIconKind.Cloud,
+          "自动同步",
+          if (state.tokenPresent) "文本、链接、图片缩略图保持同步" else "需先配置服务器并加入同步空间",
+          checked = state.p2pEnabled && state.tokenPresent,
+          onCheckedChange = { enabled ->
+            if (enabled) {
+              if (state.tokenPresent) {
+                onP2pEnabledChange(true)
+              } else {
+                syncConfigExpanded = true
+              }
+            } else {
+              onP2pEnabledChange(false)
+            }
+          },
+          tone = ClipDockTone.Green,
+        )
         SettingDivider()
         SwitchSettingRow(ClipDockIconKind.Wifi, "仅 Wi-Fi 下载原文件", "缩略图始终同步，原文件等 Wi-Fi", state.wifiOnly, onWifiOnlyChange, ClipDockTone.Blue)
         SettingDivider()
         SettingRow(ClipDockIconKind.Download, "远程文件下载", "原始文件按需下载，保留缩略图预览", tone = ClipDockTone.Amber) {
           ClipDockSymbol(ClipDockIconKind.Chevron, Modifier.size(18.dp), color = LocalClipDockTokens.current.colors.muted)
         }
+      }
+    }
+    if (!state.tokenPresent && syncConfigExpanded) {
+      item {
+        SyncServerConfigCard(
+          state = state,
+          onServerUrlChange = onServerUrlChange,
+          onCheckHealth = onCheckHealth,
+          onCreateSyncSpace = onCreateSyncSpace,
+          onJoinSyncSpace = onJoinSyncSpace,
+        )
       }
     }
 
@@ -3198,10 +3237,29 @@ private fun SettingsOverviewPage(
     item { SettingsSectionTitle("悬浮球") }
     item {
       SettingGroup {
-        SwitchSettingRow(ClipDockIconKind.Window, "启用悬浮球", "在其他应用中快速复制和打开面板", state.overlayEnabled, onOverlayEnabledChange, ClipDockTone.Blue)
+        SwitchSettingRow(
+          ClipDockIconKind.Window,
+          "启用悬浮球",
+          if (overlayGranted) "在其他应用中快速复制和打开面板" else "需要授予「在其他应用上层显示」权限",
+          checked = state.overlayEnabled && overlayGranted,
+          onCheckedChange = { enabled ->
+            if (enabled) {
+              if (Settings.canDrawOverlays(context)) {
+                onOverlayEnabledChange(true)
+                startFloatingOverlay(context)
+              } else {
+                openOverlayPermission(context)
+              }
+            } else {
+              onOverlayEnabledChange(false)
+              stopFloatingOverlay(context)
+            }
+          },
+          tone = ClipDockTone.Blue,
+        )
         SettingDivider()
         SettingRow(ClipDockIconKind.More, "外观与位置", "尺寸、停靠边缘和闲置透明度", tone = ClipDockTone.Neutral, onClick = { onOpenSettingsDetail(SettingsDetailDestination.FloatingBall) }) {
-          StatusPill(if (state.overlayEnabled) "已启用" else "关闭", if (state.overlayEnabled) ClipDockTone.Green else ClipDockTone.Neutral)
+          StatusPill(if (state.overlayEnabled && overlayGranted) "已启用" else "关闭", if (state.overlayEnabled && overlayGranted) ClipDockTone.Green else ClipDockTone.Neutral)
         }
       }
     }
@@ -3220,10 +3278,39 @@ private fun SettingsOverviewPage(
           ClipDockSymbol(ClipDockIconKind.Chevron, Modifier.size(18.dp), color = LocalClipDockTokens.current.colors.muted)
         }
         SettingDivider()
-        SettingRow(ClipDockIconKind.Server, "服务器地址", state.serverUrl, tone = ClipDockTone.Neutral, onClick = { onOpenSettingsDetail(SettingsDetailDestination.ServerAdvanced) }) {
+        SettingRow(ClipDockIconKind.Server, "连接维护", "服务端地址、检查连接与同步空间信息", tone = ClipDockTone.Neutral, onClick = { onOpenSettingsDetail(SettingsDetailDestination.ServerAdvanced) }) {
           ClipDockSymbol(ClipDockIconKind.Chevron, Modifier.size(18.dp), color = LocalClipDockTokens.current.colors.muted)
         }
       }
+    }
+  }
+}
+
+@Composable
+private fun SyncServerConfigCard(
+  state: ClipDockUiState,
+  onServerUrlChange: (String) -> Unit,
+  onCheckHealth: () -> Unit,
+  onCreateSyncSpace: () -> Unit,
+  onJoinSyncSpace: (String) -> Unit,
+) {
+  val tokens = LocalClipDockTokens.current.colors
+  var pairingCode by remember { mutableStateOf("") }
+  val canRunSetup = !state.isSyncSetupInFlight
+  val hasSyncRegistration = state.tokenPresent || !state.syncId.isNullOrBlank() || !state.deviceId.isNullOrBlank()
+  ClipDockCard {
+    Text("连接同步服务器", style = MaterialTheme.typography.titleSmall)
+    Text("配置服务端并加入同步空间后，自动同步才会开启", style = MaterialTheme.typography.bodySmall, color = tokens.muted)
+    OutlinedTextField(value = state.serverUrl, onValueChange = onServerUrlChange, label = { Text("服务端地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedButton(onClick = onCheckHealth, enabled = canRunSetup, modifier = Modifier.fillMaxWidth()) {
+      Text(if (state.connectionStatus == "可连接") "连接正常 · 重新检查" else "检查连接")
+    }
+    SettingDivider()
+    OutlinedTextField(value = pairingCode, onValueChange = { pairingCode = it.take(5).uppercase() }, label = { Text("5 位配对码（加入已有空间）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    Button(onClick = { onJoinSyncSpace(pairingCode) }, enabled = pairingCode.length == 5 && canRunSetup, modifier = Modifier.fillMaxWidth()) { Text("加入空间") }
+    Button(onClick = onCreateSyncSpace, enabled = !hasSyncRegistration && canRunSetup, modifier = Modifier.fillMaxWidth()) { Text("在本机创建新空间") }
+    state.diagnostics.lastError?.let { error ->
+      Text(error, style = MaterialTheme.typography.bodySmall, color = tokens.danger)
     }
   }
 }

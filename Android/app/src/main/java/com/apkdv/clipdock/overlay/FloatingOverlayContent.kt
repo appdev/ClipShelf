@@ -215,7 +215,7 @@ private fun DockColumn(
 ) {
   val tokens = LocalClipDockTokens.current.colors
   Column(
-    modifier = Modifier.width(72.dp).clip(RoundedCornerShape(20.dp)).background(tokens.overlayDock).padding(vertical = 9.dp),
+    modifier = Modifier.width(72.dp).clip(RoundedCornerShape(20.dp)).background(tokens.overlayDock.copy(alpha = 1f)).padding(vertical = 9.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
@@ -347,7 +347,7 @@ private fun PreviewFlyout(item: ClipHistoryItem, onCopyItem: (ClipHistoryItem) -
   val tokens = LocalClipDockTokens.current.colors
   val tone = typeColor(item.type)
   Column(
-    modifier = Modifier.width(168.dp).clip(RoundedCornerShape(16.dp)).background(tokens.overlayDock).padding(12.dp),
+    modifier = Modifier.width(168.dp).clip(RoundedCornerShape(16.dp)).background(tokens.overlayDock.copy(alpha = 1f)).padding(12.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
