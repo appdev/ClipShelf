@@ -258,8 +258,9 @@ impl ManagedP2PNode {
         let endpoint = self.router.endpoint().clone();
         let client = self.client.clone();
         self.runtime.block_on(async move {
+            let in_place = true;
             let started = client
-                .add_from_path(file_path, false, SetTagOption::Auto, WrapOption::NoWrap)
+                .add_from_path(file_path, in_place, SetTagOption::Auto, WrapOption::NoWrap)
                 .await
                 .context("failed starting blob import")?;
             let blob = tokio::time::timeout(timeout, started.finish())
