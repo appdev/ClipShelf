@@ -40,6 +40,7 @@ struct PanelPresentationAnimationCompletionSnapshot: Equatable {
     let hostTransformTranslationY: CGFloat
     let hostTransformIsIdentity: Bool
     let hostOpacity: Float
+    let hostHasPresentationAnimation: Bool
 }
 
 private enum PanelPresentationTiming {
@@ -302,6 +303,7 @@ final class FloatingPanelController {
         if shouldAnimateEntrance {
             setPresentationLayerState(transform: fromTransform, opacity: fromOpacity)
         }
+        panel.alphaValue = 1
         ClipDockPerformanceLog.measure("panel.show.orderWindow") {
             panel.makeKeyAndOrderFront(nil)
         }
@@ -409,6 +411,7 @@ final class FloatingPanelController {
             resetPresentationLayerBeforeCompletion: false
         ) { [weak self] in
             guard let self, !self.isPanelPresented else { return }
+            self.panel.alphaValue = 0
             self.panel.orderOut(nil)
             self.panel.setFrame(shownFrame, display: false)
             self.semanticPanelFrame = shownFrame
@@ -853,7 +856,10 @@ final class FloatingPanelController {
                         panelIsVisible: self.panel.isVisible,
                         hostTransformTranslationY: transform.m42,
                         hostTransformIsIdentity: transform.isApproximatelyIdentity,
-                        hostOpacity: layer?.opacity ?? 0
+                        hostOpacity: layer?.opacity ?? 0,
+                        hostHasPresentationAnimation: layer?.animation(
+                            forKey: PanelPresentationAnimation.layerAnimationKey
+                        ) != nil
                     ))
                 }
                 let durationMilliseconds = (ProcessInfo.processInfo.systemUptime - startTime) * 1_000
@@ -901,7 +907,8 @@ final class FloatingPanelController {
         animationGroup.animations = [transformAnimation, opacityAnimation]
         animationGroup.duration = duration
         animationGroup.timingFunction = timing.mediaTimingFunction
-        animationGroup.isRemovedOnCompletion = true
+        animationGroup.fillMode = .forwards
+        animationGroup.isRemovedOnCompletion = false
         animationGroup.delegate = delegate
 
         CATransaction.begin()

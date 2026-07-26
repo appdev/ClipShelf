@@ -2066,6 +2066,17 @@ struct PanelRuntimeSeamTests {
         #expect(controller.smokePresentationWindowFrame == shownFrame)
         #expect(controller.smokePresentationHostTransformIsIdentity)
         #expect(abs(controller.smokePresentationHostOpacity - 1) < 0.001)
+        #expect(controller.smokePanelAlphaValue == 0)
+
+        controller.show()
+        #expect(await waitForMainActor(attempts: 240) {
+            controller.smokePanelIsActuallyVisible && !controller.smokeHasActivePanelAnimation
+        })
+        #expect(controller.smokePanelAlphaValue == 1)
+        controller.hide(restoresPreviousApplicationFocus: false)
+        #expect(await waitForMainActor(attempts: 240) {
+            !controller.smokePanelIsActuallyVisible && !controller.smokeHasActivePanelAnimation
+        })
     }
 
     @Test
@@ -2097,11 +2108,13 @@ struct PanelRuntimeSeamTests {
         #expect(!snapshot.hostTransformIsIdentity)
         #expect(snapshot.hostTransformTranslationY < -1)
         #expect(snapshot.hostOpacity < 1)
+        #expect(snapshot.hostHasPresentationAnimation)
 
         #expect(await waitForMainActor(attempts: 240) {
             !controller.smokePanelIsActuallyVisible && !controller.smokeHasActivePanelAnimation
         })
         #expect(controller.smokePresentationHostTransformIsIdentity)
+        #expect(controller.smokePanelAlphaValue == 0)
     }
 
     @Test
