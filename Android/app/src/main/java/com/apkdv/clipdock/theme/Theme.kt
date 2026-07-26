@@ -70,7 +70,11 @@ fun ClipDockTheme(
   val tokens = if (darkTheme) DarkClipDockTokens else LightClipDockTokens
   val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 
-  CompositionLocalProvider(LocalClipDockTokens provides tokens) {
-    MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+  val clipColors = if (darkTheme) DarkClipColors else LightClipColors
+  CompositionLocalProvider(
+    LocalClipDockTokens provides tokens,
+    LocalClipColors provides clipColors,
+  ) {
+    MaterialTheme(colorScheme = colorScheme, typography = ClipTypography, shapes = ClipShapes, content = content)
   }
 }

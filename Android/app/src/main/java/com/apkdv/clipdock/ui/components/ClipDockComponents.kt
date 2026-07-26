@@ -49,7 +49,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apkdv.clipdock.R
-import com.apkdv.clipdock.theme.LocalClipDockTokens
+import com.apkdv.clipdock.theme.ClipTheme
 
 enum class ClipDockIconKind {
   History,
@@ -90,14 +90,15 @@ fun ClipDockScreenHeader(
   modifier: Modifier = Modifier,
   actions: @Composable RowScope.() -> Unit = {},
 ) {
+  val c = ClipTheme.colors
   Row(
     modifier = modifier.fillMaxWidth(),
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(LocalClipDockTokens.current.spacing.gapMd),
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
   ) {
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      Text(title, color = LocalClipDockTokens.current.colors.ink, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-      Text(subtitle, color = LocalClipDockTokens.current.colors.muted, fontSize = 13.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text(title, color = c.ink, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+      Text(subtitle, color = c.ink2, fontSize = 13.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, content = actions)
   }
@@ -111,21 +112,19 @@ fun ClipDockIconButton(
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
 ) {
-  val tokens = LocalClipDockTokens.current
+  val c = ClipTheme.colors
   Surface(
     shape = CircleShape,
-    color = tokens.colors.surface,
-    contentColor = if (enabled) tokens.colors.muted else tokens.colors.faint,
-    border = BorderStroke(1.dp, tokens.colors.line),
-    modifier =
-      modifier
-        .size(42.dp)
-        .clip(CircleShape)
-        .clickable(enabled = enabled, onClick = onClick)
-        .semantics { this.contentDescription = contentDescription },
+    color = c.surface,
+    shadowElevation = 2.dp,
+    modifier = modifier
+      .size(42.dp)
+      .clip(CircleShape)
+      .clickable(enabled = enabled, onClick = onClick)
+      .semantics { this.contentDescription = contentDescription },
   ) {
     Box(contentAlignment = Alignment.Center) {
-      ClipDockSymbol(icon, Modifier.size(22.dp))
+      ClipDockSymbol(icon, Modifier.size(22.dp), color = if (enabled) c.ink2 else c.ink3)
     }
   }
 }
@@ -136,12 +135,10 @@ fun ClipDockCard(
   contentPadding: PaddingValues = PaddingValues(14.dp),
   content: @Composable ColumnScope.() -> Unit,
 ) {
-  val tokens = LocalClipDockTokens.current
   Surface(
-    shape = RoundedCornerShape(tokens.shapes.card),
-    color = tokens.colors.surface,
-    border = BorderStroke(1.dp, tokens.colors.softLine),
-    shadowElevation = 0.dp,
+    shape = RoundedCornerShape(16.dp),
+    color = ClipTheme.colors.surface,
+    shadowElevation = 2.dp,
     modifier = modifier,
   ) {
     Column(Modifier.padding(contentPadding), verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
@@ -158,22 +155,21 @@ fun ClipDockHeroBanner(
   actionTone: ClipDockTone = ClipDockTone.Green,
   onClick: (() -> Unit)? = null,
 ) {
-  val tokens = LocalClipDockTokens.current
+  val c = ClipTheme.colors
   Row(
-    modifier =
-      modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(18.dp))
-        .background(tokens.colors.heroBanner)
-        .clickable(enabled = onClick != null, onClick = { onClick?.invoke() })
-        .padding(12.dp),
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(18.dp))
+      .background(c.surface)
+      .clickable(enabled = onClick != null, onClick = { onClick?.invoke() })
+      .padding(12.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(12.dp),
   ) {
-    IconTile(icon, tone = ClipDockTone.Neutral, dark = true)
+    IconTile(icon, tone = ClipDockTone.Neutral)
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      Text(title, style = MaterialTheme.typography.titleSmall, color = tokens.colors.heroBannerContent)
-      Text(subtitle, style = MaterialTheme.typography.bodySmall, color = tokens.colors.heroBannerMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+      Text(title, style = MaterialTheme.typography.titleSmall, color = c.ink)
+      Text(subtitle, style = MaterialTheme.typography.bodySmall, color = c.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
     StatusPill(actionLabel, actionTone)
   }
@@ -189,16 +185,15 @@ fun RowCard(
   onClick: (() -> Unit)? = null,
   trailing: @Composable RowScope.() -> Unit = {},
 ) {
-  val tokens = LocalClipDockTokens.current
+  val c = ClipTheme.colors
   Surface(
-    shape = RoundedCornerShape(tokens.shapes.rowCard),
-    color = tokens.colors.surface,
-    border = BorderStroke(1.dp, tokens.colors.softLine),
-    modifier =
-      modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(tokens.shapes.rowCard))
-        .clickable(enabled = onClick != null, onClick = { onClick?.invoke() }),
+    shape = RoundedCornerShape(14.dp),
+    color = c.surface,
+    shadowElevation = 2.dp,
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(14.dp))
+      .clickable(enabled = onClick != null, onClick = { onClick?.invoke() }),
   ) {
     Row(
       modifier = Modifier.fillMaxWidth().padding(11.dp),
@@ -207,8 +202,8 @@ fun RowCard(
     ) {
       IconTile(icon = icon, tone = tone)
       Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = tokens.colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = tokens.colors.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(title, style = MaterialTheme.typography.titleSmall, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = c.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
       }
       trailing()
     }
@@ -217,11 +212,10 @@ fun RowCard(
 
 @Composable
 fun SettingGroup(content: @Composable ColumnScope.() -> Unit) {
-  val tokens = LocalClipDockTokens.current
   Surface(
-    shape = RoundedCornerShape(tokens.shapes.card),
-    color = tokens.colors.surface,
-    border = BorderStroke(1.dp, tokens.colors.softLine),
+    shape = RoundedCornerShape(16.dp),
+    color = ClipTheme.colors.surface,
+    shadowElevation = 2.dp,
     modifier = Modifier.fillMaxWidth(),
   ) {
     Column(content = content)
@@ -250,8 +244,8 @@ fun SettingRow(
   ) {
     IconTile(icon, tone)
     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-      Text(title, style = MaterialTheme.typography.titleSmall, color = LocalClipDockTokens.current.colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      Text(subtitle, style = MaterialTheme.typography.bodySmall, color = LocalClipDockTokens.current.colors.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text(title, style = MaterialTheme.typography.titleSmall, color = ClipTheme.colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text(subtitle, style = MaterialTheme.typography.bodySmall, color = ClipTheme.colors.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
     trailing()
   }
@@ -259,7 +253,7 @@ fun SettingRow(
 
 @Composable
 fun SettingDivider() {
-  HorizontalDivider(color = LocalClipDockTokens.current.colors.softLine, thickness = DividerDefaults.Thickness)
+  HorizontalDivider(color = ClipTheme.colors.hairline, thickness = DividerDefaults.Thickness)
 }
 
 @Composable
@@ -300,7 +294,7 @@ fun ActionChip(
   Surface(
     shape = CircleShape,
     color = colors.container.copy(alpha = if (enabled) colors.container.alpha else 0.5f),
-    contentColor = if (enabled) colors.content else LocalClipDockTokens.current.colors.faint,
+    contentColor = if (enabled) colors.content else ClipTheme.colors.ink3,
     modifier =
       modifier
         .height(30.dp)
@@ -320,37 +314,35 @@ fun SegmentedControl(
   onSelected: (String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val tokens = LocalClipDockTokens.current
+  val c = ClipTheme.colors
   Row(
-    modifier =
-      modifier
-        .fillMaxWidth()
-        .height(34.dp)
-        .clip(CircleShape)
-        .background(tokens.colors.surface3)
-        .padding(3.dp),
+    modifier = modifier
+      .fillMaxWidth()
+      .height(34.dp)
+      .clip(CircleShape)
+      .background(c.sunken)
+      .padding(3.dp),
     horizontalArrangement = Arrangement.spacedBy(4.dp),
   ) {
     options.forEach { option ->
       val isSelected = option == selected
       Box(
-        modifier =
-          Modifier
-            .weight(1f)
-            .height(28.dp)
-            .clip(CircleShape)
-            .background(if (isSelected) tokens.colors.surface else Color.Transparent)
-            .selectable(
-              selected = isSelected,
-              role = Role.Tab,
-              onClick = { onSelected(option) },
-              interactionSource = remember { MutableInteractionSource() },
-              indication = null,
-            )
-            .semantics { this.selected = isSelected },
+        modifier = Modifier
+          .weight(1f)
+          .height(28.dp)
+          .clip(CircleShape)
+          .background(if (isSelected) c.surface else Color.Transparent)
+          .selectable(
+            selected = isSelected,
+            role = Role.Tab,
+            onClick = { onSelected(option) },
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+          )
+          .semantics { this.selected = isSelected },
         contentAlignment = Alignment.Center,
       ) {
-        Text(option, style = MaterialTheme.typography.labelSmall, color = if (isSelected) tokens.colors.ink else tokens.colors.muted)
+        Text(option, style = MaterialTheme.typography.labelSmall, color = if (isSelected) c.ink else c.ink2)
       }
     }
   }
@@ -367,8 +359,8 @@ fun SliderSettingCard(
   modifier: Modifier = Modifier,
 ) {
   ClipDockCard(modifier = modifier) {
-    Text(title, style = MaterialTheme.typography.titleSmall, color = LocalClipDockTokens.current.colors.ink)
-    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = LocalClipDockTokens.current.colors.muted)
+    Text(title, style = MaterialTheme.typography.titleSmall, color = ClipTheme.colors.ink)
+    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = ClipTheme.colors.ink2)
     Slider(value = value, onValueChange = onValueChange, valueRange = valueRange, steps = steps)
   }
 }
@@ -380,16 +372,16 @@ fun IconTile(
   modifier: Modifier = Modifier,
   dark: Boolean = false,
 ) {
-  val colors = tone.colors()
+  val toneColors = tone.colors()
+  val c = ClipTheme.colors
   Box(
-    modifier =
-      modifier
-        .size(40.dp)
-        .clip(RoundedCornerShape(LocalClipDockTokens.current.shapes.iconTile))
-        .background(if (dark) LocalClipDockTokens.current.colors.heroBannerIconContainer else colors.container),
+    modifier = modifier
+      .size(40.dp)
+      .clip(RoundedCornerShape(11.dp))
+      .background(if (dark) c.sunken else toneColors.container),
     contentAlignment = Alignment.Center,
   ) {
-    ClipDockSymbol(icon, Modifier.size(21.dp), color = if (dark) LocalClipDockTokens.current.colors.heroBannerContent else colors.content)
+    ClipDockSymbol(icon, Modifier.size(21.dp), color = if (dark) c.ink2 else toneColors.content)
   }
 }
 
@@ -400,11 +392,10 @@ fun ClipDockBottomNav(
   onSelected: (String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val tokens = LocalClipDockTokens.current
+  val c = ClipTheme.colors
   Surface(
-    shape = RoundedCornerShape(tokens.shapes.bottomNav),
-    color = tokens.colors.surface.copy(alpha = 0.94f),
-    border = BorderStroke(1.dp, tokens.colors.softLine),
+    shape = RoundedCornerShape(0.dp),
+    color = c.surface.copy(alpha = 0.94f),
     shadowElevation = 4.dp,
     modifier =
       modifier
@@ -417,14 +408,13 @@ fun ClipDockBottomNav(
     ) {
       destinations.forEach { destination ->
         val isSelected = destination.key == selected
-        val contentColor = if (isSelected) tokens.colors.accent else tokens.colors.muted
+        val contentColor = if (isSelected) c.coral else c.ink2
         Column(
-          modifier =
-            Modifier
+          modifier = Modifier
               .weight(1f)
               .fillMaxHeight()
               .clip(RoundedCornerShape(17.dp))
-              .background(if (isSelected) tokens.colors.accentSoft else Color.Transparent)
+              .background(if (isSelected) c.coralSoft else Color.Transparent)
               .clickable { onSelected(destination.key) }
               .semantics {
                 this.contentDescription = destination.label
@@ -462,13 +452,13 @@ private data class ToneColors(val content: Color, val container: Color)
 
 @Composable
 private fun ClipDockTone.colors(): ToneColors {
-  val colors = LocalClipDockTokens.current.colors
+  val c = ClipTheme.colors
   return when (this) {
-    ClipDockTone.Green -> ToneColors(colors.accent, colors.accentSoft)
-    ClipDockTone.Blue -> ToneColors(colors.accent2, colors.blueSoft)
-    ClipDockTone.Amber -> ToneColors(colors.warn, colors.warnSoft)
-    ClipDockTone.Red -> ToneColors(colors.danger, colors.dangerSoft)
-    ClipDockTone.Neutral -> ToneColors(colors.muted, colors.surface3)
+    ClipDockTone.Green   -> ToneColors(c.online,          c.onlineSoft)
+    ClipDockTone.Blue    -> ToneColors(c.accentLink.fg,   c.accentLink.bg)
+    ClipDockTone.Amber   -> ToneColors(Color(0xFFD97706), Color(0xFFFEF3C7))
+    ClipDockTone.Red     -> ToneColors(Color(0xFFDC2626), Color(0xFFFEE2E2))
+    ClipDockTone.Neutral -> ToneColors(c.ink2,            c.sunken)
   }
 }
 
@@ -477,7 +467,7 @@ private fun ClipDockTone.colors(): ToneColors {
 fun ClipDockSymbol(
   icon: ClipDockIconKind,
   modifier: Modifier = Modifier,
-  color: Color = LocalClipDockTokens.current.colors.muted,
+  color: Color = ClipTheme.colors.ink2,
   strokeWidth: Float = 2.4f,
 ) {
   Icon(
