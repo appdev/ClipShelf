@@ -4,7 +4,7 @@ import ClipboardPanelApp
 import QuartzCore
 
 private enum PanelPresentationAnimation {
-    static let showDuration: TimeInterval = 0.16
+    static let showDuration: TimeInterval = 0.20
     static let hideDuration: TimeInterval = 0.18
     static let hiddenOpacity: Float = 0.92
     static let layerAnimationKey = "clipdock.panel.presentation"

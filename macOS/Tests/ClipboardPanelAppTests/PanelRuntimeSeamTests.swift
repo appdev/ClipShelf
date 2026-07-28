@@ -2177,6 +2177,39 @@ struct PanelRuntimeSeamTests {
 
     @Test
     @MainActor
+    func panelEntranceRunsLongerThanDismissal() async throws {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        app.activate(ignoringOtherApps: true)
+
+        let controller = FloatingPanelController()
+        controller.smokeResetPresentationAnimationSamples()
+
+        for _ in 0..<4 {
+            controller.show()
+            #expect(await waitForMainActor(attempts: 240) {
+                controller.smokePanelIsActuallyVisible && !controller.smokeHasActivePanelAnimation
+            })
+
+            controller.hide(restoresPreviousApplicationFocus: false)
+            #expect(await waitForMainActor(attempts: 240) {
+                !controller.smokePanelIsActuallyVisible && !controller.smokeHasActivePanelAnimation
+            })
+        }
+
+        let samples = controller.smokePresentationAnimationSamples
+        let showDurations = samples.filter { $0.name == "show" }.map(\.durationMilliseconds)
+        let hideDurations = samples.filter { $0.name == "hide" }.map(\.durationMilliseconds)
+        try #require(showDurations.count == 4)
+        try #require(hideDurations.count == 4)
+
+        let showAverage = showDurations.reduce(0, +) / Double(showDurations.count)
+        let hideAverage = hideDurations.reduce(0, +) / Double(hideDurations.count)
+        #expect(showAverage > hideAverage + 10)
+    }
+
+    @Test
+    @MainActor
     func floatingPanelControllerCoalescesFullListUpdatesDuringPresentationAnimation() async throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
