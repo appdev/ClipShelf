@@ -13,6 +13,28 @@ struct LaunchAtLoginError: LocalizedError {
     }
 }
 
+private struct LaunchAtLoginOperationErrors: LocalizedError {
+    let errors: [any Error]
+
+    var errorDescription: String? {
+        errors.map(\.localizedDescription).joined(separator: "\n")
+    }
+}
+
+enum LegacyLaunchAtLoginArtifactError: LocalizedError {
+    case unsupportedItemType
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedItemType:
+            AppLocalization.text(
+                "launchAtLogin.invalidLegacyArtifact",
+                defaultValue: "The legacy Login Item path is not a removable file."
+            )
+        }
+    }
+}
+
 enum LaunchAtLoginServiceStatus: Equatable {
     case enabled
     case notRegistered
@@ -32,6 +54,7 @@ protocol LaunchAtLoginServicing: AnyObject {
 @MainActor
 protocol LegacyLaunchAtLoginArtifactHandling: AnyObject {
     var isInstalled: Bool { get }
+    var authorizationStatus: LaunchAtLoginServiceStatus { get }
     func remove() throws
 }
 
@@ -51,6 +74,7 @@ enum LaunchAtLoginMigrationOutcome: Equatable {
 struct LaunchAtLoginDiagnostics: Equatable {
     let serviceStatus: LaunchAtLoginServiceStatus
     let legacyArtifactInstalled: Bool
+    let legacyAuthorizationStatus: LaunchAtLoginServiceStatus?
     let migrationNeeded: Bool
 }
 
@@ -82,7 +106,11 @@ extension LaunchAtLoginMigrationOutcome {
 @MainActor
 final class SystemLaunchAtLoginService: LaunchAtLoginServicing {
     var status: LaunchAtLoginServiceStatus {
-        switch SMAppService.mainApp.status {
+        Self.mapStatus(SMAppService.mainApp.status)
+    }
+
+    static func mapStatus(_ status: SMAppService.Status) -> LaunchAtLoginServiceStatus {
+        switch status {
         case .enabled:
             .enabled
         case .notRegistered:
@@ -115,10 +143,16 @@ final class LegacyLaunchAtLoginArtifact: LegacyLaunchAtLoginArtifactHandling {
     private let fileManager: FileManager
 
     init(bundleIdentifier: String, fileManager: FileManager = .default) {
-        plistURL = fileManager.homeDirectoryForCurrentUser
+        let plistURL = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("LaunchAgents", isDirectory: true)
             .appendingPathComponent("\(bundleIdentifier).launch-at-login.plist")
+        self.plistURL = plistURL
+        self.fileManager = fileManager
+    }
+
+    init(plistURL: URL, fileManager: FileManager = .default) {
+        self.plistURL = plistURL
         self.fileManager = fileManager
     }
 
@@ -126,8 +160,21 @@ final class LegacyLaunchAtLoginArtifact: LegacyLaunchAtLoginArtifactHandling {
         fileManager.fileExists(atPath: plistURL.path)
     }
 
+    var authorizationStatus: LaunchAtLoginServiceStatus {
+        SystemLaunchAtLoginService.mapStatus(
+            SMAppService.statusForLegacyPlist(at: plistURL)
+        )
+    }
+
     func remove() throws {
         guard isInstalled else { return }
+        let values = try plistURL.resourceValues(forKeys: [
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+        ])
+        guard values.isRegularFile == true || values.isSymbolicLink == true else {
+            throw LegacyLaunchAtLoginArtifactError.unsupportedItemType
+        }
         try fileManager.removeItem(at: plistURL)
     }
 }
@@ -166,6 +213,15 @@ final class LaunchAtLoginController {
               let legacyArtifact,
               legacyArtifact.isInstalled else {
             return .notNeeded
+        }
+
+        switch legacyArtifact.authorizationStatus {
+        case .enabled:
+            break
+        case .requiresApproval:
+            return .retainedLegacy(.requiresApproval)
+        case .notRegistered, .notFound, .unknown:
+            return .retainedLegacy(.modernServiceInactive)
         }
 
         switch service.status {
@@ -223,10 +279,15 @@ final class LaunchAtLoginController {
 
     func diagnostics() -> LaunchAtLoginDiagnostics {
         let legacyArtifactInstalled = legacyArtifact?.isInstalled ?? false
+        let legacyAuthorizationStatus = legacyArtifactInstalled
+            ? legacyArtifact?.authorizationStatus
+            : nil
         return LaunchAtLoginDiagnostics(
             serviceStatus: service.status,
             legacyArtifactInstalled: legacyArtifactInstalled,
-            migrationNeeded: isRunningAsApplicationBundle && legacyArtifactInstalled
+            legacyAuthorizationStatus: legacyAuthorizationStatus,
+            migrationNeeded: isRunningAsApplicationBundle
+                && legacyAuthorizationStatus == .enabled
         )
     }
 
@@ -251,13 +312,27 @@ final class LaunchAtLoginController {
     }
 
     private func disable() throws {
-        switch service.status {
-        case .enabled, .requiresApproval:
-            try service.unregister()
-        case .notRegistered, .notFound, .unknown:
-            break
+        var errors: [any Error] = []
+        do {
+            switch service.status {
+            case .enabled, .requiresApproval:
+                try service.unregister()
+            case .notRegistered, .notFound, .unknown:
+                break
+            }
+        } catch {
+            errors.append(error)
         }
-        try removeLegacyArtifactIfInstalled()
+
+        do {
+            try removeLegacyArtifactIfInstalled()
+        } catch {
+            errors.append(error)
+        }
+
+        if !errors.isEmpty {
+            throw LaunchAtLoginOperationErrors(errors: errors)
+        }
     }
 
     private func removeLegacyAfterEnablement() -> LaunchAtLoginMigrationOutcome {
@@ -279,13 +354,27 @@ final class LaunchAtLoginController {
         case .enabled:
             return .enabled
         case .notRegistered:
-            return legacyArtifact?.isInstalled == true ? .legacyEnabled : .notRegistered
+            return currentInactiveSystemStatus(fallback: .notRegistered)
         case .requiresApproval:
             return .requiresApproval
         case .notFound:
-            return legacyArtifact?.isInstalled == true ? .legacyEnabled : .notFound
+            return currentInactiveSystemStatus(fallback: .notFound)
         case .unknown:
             return .unknown
+        }
+    }
+
+    private func currentInactiveSystemStatus(
+        fallback: LaunchAtLoginSystemStatus
+    ) -> LaunchAtLoginSystemStatus {
+        guard legacyArtifact?.isInstalled == true else { return fallback }
+        switch legacyArtifact?.authorizationStatus {
+        case .enabled:
+            return .legacyEnabled
+        case .unknown:
+            return .unknown
+        case .notRegistered, .requiresApproval, .notFound, .none:
+            return fallback
         }
     }
 }

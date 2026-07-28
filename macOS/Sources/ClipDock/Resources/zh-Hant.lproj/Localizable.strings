@@ -82,6 +82,7 @@
 "item.type.text" = "文字";
 "launchAtLogin.enabled" = "已加入登入項目";
 "launchAtLogin.legacyPreserved" = "註冊成功後將移除舊的登入項目";
+"launchAtLogin.invalidLegacyArtifact" = "舊登入項目路徑不是可安全移除的檔案。";
 "launchAtLogin.notFound" = "登入後自動啟動";
 "launchAtLogin.notRegistered" = "登入後自動啟動";
 "launchAtLogin.requiresAppBundle" = "封裝為 .app 後可用";

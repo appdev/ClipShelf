@@ -1618,6 +1618,7 @@ enum LaunchAtLoginDiagnosticsCommand {
         print("bundleIdentifier=\(Bundle.main.bundleIdentifier ?? "none")")
         print("serviceStatus=\(diagnostics.serviceStatus.rawDiagnosticValue)")
         print("legacyArtifactInstalled=\(diagnostics.legacyArtifactInstalled)")
+        print("legacyAuthorizationStatus=\(diagnostics.legacyAuthorizationStatus?.rawDiagnosticValue ?? "notInstalled")")
         print("migrationNeeded=\(diagnostics.migrationNeeded)")
         print("isOn=\(state.isOn)")
         print("canChange=\(state.canChange)")

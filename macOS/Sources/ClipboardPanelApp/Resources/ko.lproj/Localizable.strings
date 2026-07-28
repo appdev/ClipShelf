@@ -33,6 +33,7 @@
 "item.type.text" = "텍스트";
 "launchAtLogin.enabled" = "로그인 항목에 추가됨";
 "launchAtLogin.legacyPreserved" = "등록이 완료되면 이전 로그인 항목이 제거됩니다";
+"launchAtLogin.invalidLegacyArtifact" = "이전 로그인 항목 경로가 안전하게 제거할 수 있는 파일이 아닙니다.";
 "launchAtLogin.notFound" = "로그인 후 자동 시작";
 "launchAtLogin.notRegistered" = "로그인 후 자동 시작";
 "launchAtLogin.requiresAppBundle" = ".app으로 패키징한 후 사용 가능";
