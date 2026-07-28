@@ -4,6 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 source scripts/app-metadata.sh
+source scripts/release-signing-policy.sh
+
+codesign_identity="${CODESIGN_IDENTITY:-}"
+require_developer_id_application_identity "$codesign_identity"
 
 version="${APP_VERSION:-$(read_release_version "$(read_app_info_value CFBundleShortVersionString 0.1.0)")}"
 build="${APP_BUILD:-$(read_release_build "$(read_app_info_value CFBundleVersion 1)")}"
@@ -72,7 +76,7 @@ RUST_DARWIN_TARGETS="${release_archs[*]}" scripts/build-rust-core.sh
     printf 'archs=%s\n' "${release_archs[*]}"
     printf 'artifact_format=dmg\n'
     printf 'bundle_executable=%s\n' "$bundle_executable_name"
-    printf 'codesign_identity=%s\n' "${CODESIGN_IDENTITY:--}"
+    printf 'codesign_identity=%s\n' "$codesign_identity"
     if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
         printf 'notarization=submitted\n'
     else
@@ -92,7 +96,17 @@ for arch in "${release_archs[@]}"; do
     rm -rf "$legacy_app_path"
     rm -f "$legacy_zip_path" "$dmg_path"
 
-    APP_VERSION="$version" APP_BUILD="$build" APP_BUNDLE_NAME="$app_bundle_name" APP_EXECUTABLE_NAME="$bundle_executable_name" APP_ARCHS="$arch" SKIP_RUST_CORE_BUILD=1 scripts/package-macos-app.sh "$app_path"
+    CODESIGN_IDENTITY="$codesign_identity" \
+        APP_VERSION="$version" \
+        APP_BUILD="$build" \
+        APP_BUNDLE_NAME="$app_bundle_name" \
+        APP_EXECUTABLE_NAME="$bundle_executable_name" \
+        APP_ARCHS="$arch" \
+        SKIP_RUST_CORE_BUILD=1 \
+        scripts/package-macos-app.sh "$app_path"
+
+    codesign --verify --deep --strict "$app_path"
+    verify_release_team_identifier "$app_path"
 
     if ! command -v hdiutil >/dev/null 2>&1; then
         echo "hdiutil not found; cannot create DMG release artifact" >&2
@@ -112,10 +126,6 @@ for arch in "${release_archs[@]}"; do
     rm -rf "$staging_dir"
 
     if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
-        if [[ "${CODESIGN_IDENTITY:-}" == "" || "${CODESIGN_IDENTITY:-}" == "-" ]]; then
-            echo "notarization requires a Developer ID CODESIGN_IDENTITY" >&2
-            exit 1
-        fi
         if ! command -v xcrun >/dev/null 2>&1; then
             echo "xcrun not found; cannot notarize" >&2
             exit 1
