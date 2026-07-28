@@ -60,6 +60,24 @@ private struct TestLaunchAtLoginError: LocalizedError {
 
 struct LaunchAtLoginControllerTests {
     @Test @MainActor
+    func currentStateIsReadOnlyAndShowsPreservedLegacyRegistration() {
+        let service = FakeLaunchAtLoginService(status: .notFound)
+        let legacy = FakeLegacyLaunchAtLoginArtifact(isInstalled: true)
+        let controller = LaunchAtLoginController(
+            service: service,
+            legacyArtifact: legacy,
+            isRunningAsApplicationBundle: true
+        )
+
+        #expect(controller.currentState().isOn)
+        #expect(controller.currentState().isOn)
+        #expect(service.registerCallCount == 0)
+        #expect(service.unregisterCallCount == 0)
+        #expect(service.openSettingsCallCount == 0)
+        #expect(legacy.removeCallCount == 0)
+    }
+
+    @Test @MainActor
     func notFoundMigrationRegistersModernServiceAndThenRemovesLegacyArtifact() {
         let service = FakeLaunchAtLoginService(status: .notFound, statusAfterRegister: .enabled)
         let legacy = FakeLegacyLaunchAtLoginArtifact(isInstalled: true)

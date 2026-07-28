@@ -367,6 +367,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func continueStartupAfterInitialPresentation() {
         let startupStart = ClipDockPerformanceLog.mark()
+        let launchAtLoginMigration = ClipDockPerformanceLog.measure("startup.migrateLaunchAtLogin") {
+            launchAtLoginController.migrateLegacyRegistrationIfNeeded()
+        }
+        ClipDockPerformanceLog.event(
+            "launchAtLogin.migration",
+            detail: launchAtLoginMigration.diagnosticDescription
+        )
         ClipDockPerformanceLog.measure("startup.configureClipboardCapture") {
             configureClipboardCapture()
         }
