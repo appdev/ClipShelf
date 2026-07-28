@@ -4865,6 +4865,44 @@ struct PanelRuntimeSeamTests {
 
     @Test
     @MainActor
+    func appRuntimeKeepsPreferencesHiddenForModernEnabledLoginItemWithoutLegacyArgument() async throws {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+
+        let delegate = AppDelegate()
+        delegate.smokeApplyInitialPresentationForRealFunctionQA(
+            arguments: ["/Applications/ClipDock.app/Contents/MacOS/ClipDock"],
+            isRunningAsApplicationBundle: true,
+            isModernLaunchAtLoginEnabled: true
+        )
+
+        #expect(!delegate.smokePreferencesIsVisibleForRealFunctionQA)
+        #expect(!delegate.smokePanelIsVisibleForRealFunctionQA)
+    }
+
+    @Test
+    @MainActor
+    func appRuntimeShowsPreferencesForExplicitRequestWhenModernLoginItemIsEnabled() async throws {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+
+        let delegate = AppDelegate()
+        delegate.smokeApplyInitialPresentationForRealFunctionQA(
+            arguments: [
+                "/Applications/ClipDock.app/Contents/MacOS/ClipDock",
+                "--show-preferences"
+            ],
+            isRunningAsApplicationBundle: true,
+            isModernLaunchAtLoginEnabled: true
+        )
+
+        #expect(await waitForMainActor { delegate.smokePreferencesIsVisibleForRealFunctionQA })
+        #expect(!delegate.smokePanelIsVisibleForRealFunctionQA)
+        delegate.smokeClosePreferencesForRealFunctionQA()
+    }
+
+    @Test
+    @MainActor
     func appRuntimeShowsPreferencesWhenApplicationReopens() async throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)

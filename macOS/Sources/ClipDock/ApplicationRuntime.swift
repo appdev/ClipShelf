@@ -318,13 +318,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyInitialPresentation(arguments: [String]) {
         applyInitialPresentation(
             arguments: arguments,
-            isRunningAsApplicationBundle: isRunningAsApplicationBundle
+            isRunningAsApplicationBundle: isRunningAsApplicationBundle,
+            isModernLaunchAtLoginEnabled: launchAtLoginController.diagnostics().serviceStatus == .enabled
         )
     }
 
     private func applyInitialPresentation(
         arguments: [String],
-        isRunningAsApplicationBundle: Bool
+        isRunningAsApplicationBundle: Bool,
+        isModernLaunchAtLoginEnabled: Bool
     ) {
         if arguments.contains("--show-panel") {
             NSApp.activate(ignoringOtherApps: true)
@@ -335,7 +337,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshAccessibilityPermissionState()
             preferencesController.showPreferences()
         } else if isRunningAsApplicationBundle,
-                  !arguments.contains(ClipDockLaunchArgument.launchedAtLogin) {
+                  !arguments.contains(ClipDockLaunchArgument.launchedAtLogin),
+                  !isModernLaunchAtLoginEnabled {
             showPreferences(nil)
         }
     }
@@ -3857,16 +3860,22 @@ extension AppDelegate {
     }
 
     func smokeApplyInitialPresentationForRealFunctionQA(arguments: [String]) {
-        applyInitialPresentation(arguments: arguments)
+        applyInitialPresentation(
+            arguments: arguments,
+            isRunningAsApplicationBundle: isRunningAsApplicationBundle,
+            isModernLaunchAtLoginEnabled: false
+        )
     }
 
     func smokeApplyInitialPresentationForRealFunctionQA(
         arguments: [String],
-        isRunningAsApplicationBundle: Bool
+        isRunningAsApplicationBundle: Bool,
+        isModernLaunchAtLoginEnabled: Bool = false
     ) {
         applyInitialPresentation(
             arguments: arguments,
-            isRunningAsApplicationBundle: isRunningAsApplicationBundle
+            isRunningAsApplicationBundle: isRunningAsApplicationBundle,
+            isModernLaunchAtLoginEnabled: isModernLaunchAtLoginEnabled
         )
     }
 
