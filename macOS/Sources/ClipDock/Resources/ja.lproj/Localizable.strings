@@ -81,7 +81,8 @@
 "item.type.richText" = "テキスト";
 "item.type.text" = "テキスト";
 "launchAtLogin.enabled" = "ログイン項目に追加済み";
-"launchAtLogin.notFound" = "ログインエージェントで起動できます";
+"launchAtLogin.legacyPreserved" = "登録が成功すると古いログイン項目は削除されます";
+"launchAtLogin.notFound" = "ログイン後に自動起動";
 "launchAtLogin.notRegistered" = "ログイン後に自動起動";
 "launchAtLogin.requiresAppBundle" = ".app としてパッケージ化後に利用できます";
 "launchAtLogin.requiresApproval" = "システム設定で許可が必要です";

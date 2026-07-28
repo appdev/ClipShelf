@@ -1,7 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
 import ClipboardPanelApp
-import ServiceManagement
 
 private enum CommandLineArgumentReader {
     static func value(after flag: String, in arguments: [String]) -> String? {
@@ -1613,37 +1612,15 @@ enum LaunchAtLoginDiagnosticsCommand {
     static func run() {
         let controller = LaunchAtLoginController()
         let state = controller.currentState()
+        let diagnostics = controller.diagnostics()
 
         print("bundleURL=\(Bundle.main.bundleURL.path)")
         print("bundleIdentifier=\(Bundle.main.bundleIdentifier ?? "none")")
-        print("serviceStatus=\(serviceStatusDescription(SMAppService.mainApp.status))")
+        print("serviceStatus=\(diagnostics.serviceStatus.rawDiagnosticValue)")
+        print("legacyArtifactInstalled=\(diagnostics.legacyArtifactInstalled)")
+        print("migrationNeeded=\(diagnostics.migrationNeeded)")
         print("isOn=\(state.isOn)")
         print("canChange=\(state.canChange)")
         print("detail=\(state.detail)")
-        if let bundleIdentifier = Bundle.main.bundleIdentifier,
-           let executableURL = Bundle.main.executableURL,
-           Bundle.main.bundleURL.pathExtension == "app" {
-            let fallbackAgent = LaunchAtLoginFallbackAgent(
-                bundleIdentifier: bundleIdentifier,
-                executableURL: executableURL
-            )
-            print("fallbackPlist=\(fallbackAgent.plistURL.path)")
-            print("fallbackEnabled=\(fallbackAgent.isEnabled)")
-        }
-    }
-
-    private static func serviceStatusDescription(_ status: SMAppService.Status) -> String {
-        switch status {
-        case .enabled:
-            return "enabled"
-        case .notRegistered:
-            return "notRegistered"
-        case .requiresApproval:
-            return "requiresApproval"
-        case .notFound:
-            return "notFound"
-        @unknown default:
-            return "unknown"
-        }
     }
 }

@@ -81,7 +81,8 @@
 "item.type.richText" = "Text";
 "item.type.text" = "Text";
 "launchAtLogin.enabled" = "Added to Login Items";
-"launchAtLogin.notFound" = "Can start with the login agent";
+"launchAtLogin.legacyPreserved" = "Legacy Login Item will be removed after registration succeeds";
+"launchAtLogin.notFound" = "Start automatically after login";
 "launchAtLogin.notRegistered" = "Start automatically after login";
 "launchAtLogin.requiresAppBundle" = "Available after packaging as an .app";
 "launchAtLogin.requiresApproval" = "Needs approval in System Settings";

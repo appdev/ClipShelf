@@ -177,6 +177,7 @@ public enum MaintenanceStatusPresenter {
 
 public enum LaunchAtLoginSystemStatus: Equatable, Sendable {
     case enabled
+    case legacyEnabled
     case notRegistered
     case requiresApproval
     case notFound
@@ -211,12 +212,14 @@ public enum LaunchAtLoginPresenter {
         switch status {
         case .enabled:
             return LaunchAtLoginPresentation(isOn: true, canChange: true, detail: AppLocalization.text("launchAtLogin.enabled", defaultValue: "已加入登录项"))
+        case .legacyEnabled:
+            return LaunchAtLoginPresentation(isOn: true, canChange: true, detail: AppLocalization.text("launchAtLogin.legacyPreserved", defaultValue: "旧登录项将在注册成功后移除"))
         case .notRegistered:
             return LaunchAtLoginPresentation(isOn: false, canChange: true, detail: AppLocalization.text("launchAtLogin.notRegistered", defaultValue: "登录后自动启动"))
         case .requiresApproval:
             return LaunchAtLoginPresentation(isOn: true, canChange: true, detail: AppLocalization.text("launchAtLogin.requiresApproval", defaultValue: "需要在系统设置中允许"))
         case .notFound:
-            return LaunchAtLoginPresentation(isOn: false, canChange: true, detail: AppLocalization.text("launchAtLogin.notFound", defaultValue: "可使用登录代理启动"))
+            return LaunchAtLoginPresentation(isOn: false, canChange: true, detail: AppLocalization.text("launchAtLogin.notRegistered", defaultValue: "登录后自动启动"))
         case .unknown:
             return LaunchAtLoginPresentation(isOn: false, canChange: false, detail: AppLocalization.text("launchAtLogin.unknown", defaultValue: "当前系统状态未知"))
         }

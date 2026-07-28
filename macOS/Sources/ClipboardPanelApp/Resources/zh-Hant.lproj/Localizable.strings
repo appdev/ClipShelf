@@ -32,7 +32,8 @@
 "item.type.richText" = "文字";
 "item.type.text" = "文字";
 "launchAtLogin.enabled" = "已加入登入項目";
-"launchAtLogin.notFound" = "可使用登入代理啟動";
+"launchAtLogin.legacyPreserved" = "註冊成功後將移除舊的登入項目";
+"launchAtLogin.notFound" = "登入後自動啟動";
 "launchAtLogin.notRegistered" = "登入後自動啟動";
 "launchAtLogin.requiresAppBundle" = "封裝為 .app 後可用";
 "launchAtLogin.requiresApproval" = "需要在系統設定中允許";

@@ -243,7 +243,19 @@ struct PanelRegressionPlannerTests {
         #expect(LaunchAtLoginPresenter.presentation(
             isRunningAsApplicationBundle: true,
             status: .notFound
-        ) == LaunchAtLoginPresentation(isOn: false, canChange: true, detail: "可使用登录代理启动"))
+        ) == LaunchAtLoginPresentation(
+            isOn: false,
+            canChange: true,
+            detail: "登录后自动启动"
+        ))
+        #expect(LaunchAtLoginPresenter.presentation(
+            isRunningAsApplicationBundle: true,
+            status: .legacyEnabled
+        ) == LaunchAtLoginPresentation(
+            isOn: true,
+            canChange: true,
+            detail: "旧登录项将在注册成功后移除"
+        ))
     }
 
     @Test
