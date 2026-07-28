@@ -4829,14 +4829,53 @@ struct PanelRuntimeSeamTests {
 
     @Test
     @MainActor
-    func appRuntimeShowsPreferencesForPackagedInitialPresentation() async throws {
+    func launchAtLoginAppleEventDetectorRequiresOpenApplicationLoginItemDescriptor() {
+        let loginItemLaunch = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        loginItemLaunch.setParam(
+            NSAppleEventDescriptor(boolean: true),
+            forKeyword: AEKeyword(keyAELaunchedAsLogInItem)
+        )
+        let manualLaunch = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEOpenApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        let reopenWithLoginItemParameter = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass),
+            eventID: AEEventID(kAEReopenApplication),
+            targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+        reopenWithLoginItemParameter.setParam(
+            NSAppleEventDescriptor(boolean: true),
+            forKeyword: AEKeyword(keyAELaunchedAsLogInItem)
+        )
+
+        #expect(LaunchAtLoginAppleEventDetector.isLoginItemOpenApplication(loginItemLaunch))
+        #expect(!LaunchAtLoginAppleEventDetector.isLoginItemOpenApplication(manualLaunch))
+        #expect(!LaunchAtLoginAppleEventDetector.isLoginItemOpenApplication(reopenWithLoginItemParameter))
+    }
+
+    @Test
+    @MainActor
+    func appRuntimeShowsPreferencesForManualPackagedInitialPresentation() async throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
         let delegate = AppDelegate()
         delegate.smokeApplyInitialPresentationForRealFunctionQA(
             arguments: ["/Applications/ClipDock.app/Contents/MacOS/ClipDock"],
-            isRunningAsApplicationBundle: true
+            isRunningAsApplicationBundle: true,
+            isLaunchedAsLoginItem: false
         )
 
         #expect(await waitForMainActor { delegate.smokePreferencesIsVisibleForRealFunctionQA })
@@ -4865,7 +4904,7 @@ struct PanelRuntimeSeamTests {
 
     @Test
     @MainActor
-    func appRuntimeKeepsPreferencesHiddenForModernEnabledLoginItemWithoutLegacyArgument() async throws {
+    func appRuntimeKeepsPreferencesHiddenForModernLoginItemWithoutLegacyArgument() async throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
@@ -4873,7 +4912,7 @@ struct PanelRuntimeSeamTests {
         delegate.smokeApplyInitialPresentationForRealFunctionQA(
             arguments: ["/Applications/ClipDock.app/Contents/MacOS/ClipDock"],
             isRunningAsApplicationBundle: true,
-            isModernLaunchAtLoginEnabled: true
+            isLaunchedAsLoginItem: true
         )
 
         #expect(!delegate.smokePreferencesIsVisibleForRealFunctionQA)
@@ -4882,7 +4921,7 @@ struct PanelRuntimeSeamTests {
 
     @Test
     @MainActor
-    func appRuntimeShowsPreferencesForExplicitRequestWhenModernLoginItemIsEnabled() async throws {
+    func appRuntimeShowsPreferencesForExplicitRequestWhenModernLoginItemLaunches() async throws {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
@@ -4893,7 +4932,7 @@ struct PanelRuntimeSeamTests {
                 "--show-preferences"
             ],
             isRunningAsApplicationBundle: true,
-            isModernLaunchAtLoginEnabled: true
+            isLaunchedAsLoginItem: true
         )
 
         #expect(await waitForMainActor { delegate.smokePreferencesIsVisibleForRealFunctionQA })

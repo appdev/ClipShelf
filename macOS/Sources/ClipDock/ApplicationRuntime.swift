@@ -7,6 +7,23 @@ enum ClipDockLaunchArgument {
     static let launchedAtLogin = "--launched-at-login"
 }
 
+enum LaunchAtLoginAppleEventDetector {
+    static func isCurrentEventLoginItemOpenApplication() -> Bool {
+        isLoginItemOpenApplication(NSAppleEventManager.shared().currentAppleEvent)
+    }
+
+    static func isLoginItemOpenApplication(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard event?.eventClass == AEEventClass(kCoreEventClass),
+              event?.eventID == AEEventID(kAEOpenApplication) else {
+            return false
+        }
+
+        return event?.paramDescriptor(
+            forKeyword: AEKeyword(keyAELaunchedAsLogInItem)
+        ) != nil
+    }
+}
+
 @MainActor
 protocol CommandVKeystrokeSending {
     func sendCommandVKeystroke()
@@ -319,14 +336,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyInitialPresentation(
             arguments: arguments,
             isRunningAsApplicationBundle: isRunningAsApplicationBundle,
-            isModernLaunchAtLoginEnabled: launchAtLoginController.diagnostics().serviceStatus == .enabled
+            isLaunchedAsLoginItem: LaunchAtLoginAppleEventDetector.isCurrentEventLoginItemOpenApplication()
         )
     }
 
     private func applyInitialPresentation(
         arguments: [String],
         isRunningAsApplicationBundle: Bool,
-        isModernLaunchAtLoginEnabled: Bool
+        isLaunchedAsLoginItem: Bool
     ) {
         if arguments.contains("--show-panel") {
             NSApp.activate(ignoringOtherApps: true)
@@ -338,7 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             preferencesController.showPreferences()
         } else if isRunningAsApplicationBundle,
                   !arguments.contains(ClipDockLaunchArgument.launchedAtLogin),
-                  !isModernLaunchAtLoginEnabled {
+                  !isLaunchedAsLoginItem {
             showPreferences(nil)
         }
     }
@@ -3863,19 +3880,19 @@ extension AppDelegate {
         applyInitialPresentation(
             arguments: arguments,
             isRunningAsApplicationBundle: isRunningAsApplicationBundle,
-            isModernLaunchAtLoginEnabled: false
+            isLaunchedAsLoginItem: false
         )
     }
 
     func smokeApplyInitialPresentationForRealFunctionQA(
         arguments: [String],
         isRunningAsApplicationBundle: Bool,
-        isModernLaunchAtLoginEnabled: Bool = false
+        isLaunchedAsLoginItem: Bool = false
     ) {
         applyInitialPresentation(
             arguments: arguments,
             isRunningAsApplicationBundle: isRunningAsApplicationBundle,
-            isModernLaunchAtLoginEnabled: isModernLaunchAtLoginEnabled
+            isLaunchedAsLoginItem: isLaunchedAsLoginItem
         )
     }
 
