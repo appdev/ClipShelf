@@ -294,3 +294,133 @@ or release artifact was changed.
 - As already recorded by the final review, ad-hoc-signing compatibility with
   real `SMAppService` registration across supported macOS versions remains an
   explicit release-validation limitation.
+
+---
+
+## User-authorized residual Important fix — 2026-07-29
+
+Starting head: `47ba1db307b54e64b0769250bfbd89133237db94`
+
+The scoped re-review found that the legacy authorization consent gate ran
+before the modern service status check. That ordering correctly prevented a
+disabled legacy item from registering an inactive modern item, but incorrectly
+prevented stale-plist cleanup after the modern item was already `.enabled`.
+Diagnostics repeated the same ordering mistake by reporting
+`migrationNeeded=false` for that pending-cleanup state.
+
+### TDD red evidence
+
+Tests were added first for modern `.enabled` combined with legacy
+`.requiresApproval`, `.notRegistered`, `.notFound`, and `.unknown`. Each status
+is covered for cleanup success, cleanup failure, and read-only diagnostics.
+
+RED command:
+
+```bash
+cd macOS && swift test --filter LaunchAtLoginControllerTests
+```
+
+Exit `1`. Exact runner summary:
+
+```text
+Suite LaunchAtLoginControllerTests failed after 0.005 seconds with 24 issues.
+Test run with 19 tests failed after 0.005 seconds with 24 issues.
+```
+
+Exact observed behavior across the four legacy statuses:
+
+- cleanup-success cases returned `.retainedLegacy(.requiresApproval)` or
+  `.retainedLegacy(.modernServiceInactive)` instead of `.migrated`, recorded
+  `legacy.removeCallCount == 0` instead of `1`, and left the artifact installed;
+- cleanup-failure cases returned the same authorization/inactive outcomes
+  instead of `.retainedLegacy(.cleanupFailed("cleanup failed"))` and likewise
+  recorded zero removal attempts; and
+- diagnostics returned the correct modern and legacy status fields but
+  `migrationNeeded: false` instead of `true` for all four combinations.
+
+### Minimal production fix and green evidence
+
+`migrateLegacyRegistrationIfNeeded()` now snapshots the modern status after
+confirming that the artifact exists. Modern `.enabled` immediately attempts
+safe cleanup. Only inactive modern states proceed to the legacy authorization
+gate before any possible `register()` call.
+
+`diagnostics()` now snapshots the same modern status and reports migration or
+cleanup needed when an artifact exists and either the modern service is already
+`.enabled` or the legacy registration is authorized as `.enabled`.
+
+GREEN command:
+
+```bash
+cd macOS && swift test --filter LaunchAtLoginControllerTests
+```
+
+Exit `0`:
+
+```text
+Suite LaunchAtLoginControllerTests passed after 0.005 seconds.
+Test run with 19 tests passed after 0.005 seconds.
+```
+
+The pre-existing inactive-modern tests remained green and continue to verify
+zero registration, Settings navigation, or removal when legacy authorization
+is disabled, not found, or unknown.
+
+### Fresh final verification
+
+Focused controller/preferences/presenter/login-origin runtime command:
+
+```bash
+cd macOS && swift test --filter 'LaunchAtLoginControllerTests|PreferencesCoordinatorTests|PanelRegressionPlannerTests|launchAtLoginAppleEventDetectorRequiresOpenApplicationLoginItemDescriptor|appRuntimeKeepsPreferencesHiddenForLaunchAtLoginPresentation|appRuntimeKeepsPreferencesHiddenForModernLoginItemWithoutLegacyArgument|appRuntimeShowsPreferencesForExplicitRequestWhenModernLoginItemLaunches|appRuntimeShowsPreferencesWhenApplicationReopens'
+```
+
+Exit `0`:
+
+```text
+Suite PanelRegressionPlannerTests passed after 0.003 seconds.
+Suite LaunchAtLoginControllerTests passed after 0.004 seconds.
+Suite PanelRuntimeSeamTests passed after 0.416 seconds.
+Suite PreferencesCoordinatorTests passed after 0.417 seconds.
+Test run with 49 tests passed after 0.417 seconds.
+```
+
+Fresh build:
+
+```bash
+cd macOS && swift build
+```
+
+Exit `0`: `Build complete! (0.19s)`.
+
+Fresh whitespace check:
+
+```bash
+cd macOS && git diff --check
+```
+
+Exit `0` with no output.
+
+### Residual-fix files and decisions
+
+- Modified `macOS/Sources/ClipDock/LaunchAtLoginController.swift`.
+- Modified
+  `macOS/Tests/ClipboardPanelAppTests/LaunchAtLoginControllerTests.swift`.
+- Appended this evidence to
+  `.superpowers/sdd/2026-07-28-launch-at-login-smappservice-migration/final-fix-report.md`.
+- No script, localization, generated bridge, Rust source, release artifact,
+  live Login Item, actual legacy plist, BTM state, installed app, or System
+  Settings state was touched.
+- Modern enablement takes precedence only for cleanup. Legacy authorization
+  remains the consent gate for registration from an inactive modern state.
+- Cleanup failure continues to preserve the artifact and return the existing
+  bounded `.cleanupFailed` migration outcome.
+- Diagnostics remains read-only and now distinguishes pending stale-artifact
+  cleanup from a disabled legacy item with no modern replacement.
+
+### Remaining concerns
+
+- No live ServiceManagement/BTM, logout/login, installed-app replacement, or
+  actual plist behavior was exercised; all status/mutation behavior uses fakes.
+- The full Swift suite and packaging/signing workflow were not rerun in this
+  narrowly scoped residual fix. The previously documented unrelated schema
+  baseline failures and ad-hoc live-registration limitation remain unchanged.

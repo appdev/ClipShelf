@@ -198,6 +198,100 @@ struct LaunchAtLoginControllerTests {
         #expect(legacy.removeCallCount == 0)
     }
 
+    @Test(arguments: [
+        LaunchAtLoginServiceStatus.requiresApproval,
+        .notRegistered,
+        .notFound,
+        .unknown,
+    ])
+    @MainActor
+    func modernEnabledRemovesStaleLegacyArtifactRegardlessOfAuthorization(
+        authorizationStatus: LaunchAtLoginServiceStatus
+    ) {
+        let service = FakeLaunchAtLoginService(status: .enabled)
+        let legacy = FakeLegacyLaunchAtLoginArtifact(
+            isInstalled: true,
+            authorizationStatus: authorizationStatus
+        )
+        let controller = LaunchAtLoginController(
+            service: service,
+            legacyArtifact: legacy,
+            isRunningAsApplicationBundle: true
+        )
+
+        #expect(controller.migrateLegacyRegistrationIfNeeded() == .migrated)
+        #expect(service.registerCallCount == 0)
+        #expect(service.openSettingsCallCount == 0)
+        #expect(legacy.removeCallCount == 1)
+        #expect(!legacy.isInstalled)
+    }
+
+    @Test(arguments: [
+        LaunchAtLoginServiceStatus.requiresApproval,
+        .notRegistered,
+        .notFound,
+        .unknown,
+    ])
+    @MainActor
+    func modernEnabledReportsCleanupFailureRegardlessOfLegacyAuthorization(
+        authorizationStatus: LaunchAtLoginServiceStatus
+    ) {
+        let service = FakeLaunchAtLoginService(status: .enabled)
+        let legacy = FakeLegacyLaunchAtLoginArtifact(
+            isInstalled: true,
+            authorizationStatus: authorizationStatus
+        )
+        legacy.removalError = TestLaunchAtLoginError(
+            errorDescription: "cleanup failed"
+        )
+        let controller = LaunchAtLoginController(
+            service: service,
+            legacyArtifact: legacy,
+            isRunningAsApplicationBundle: true
+        )
+
+        #expect(controller.migrateLegacyRegistrationIfNeeded() ==
+            .retainedLegacy(.cleanupFailed("cleanup failed")))
+        #expect(service.registerCallCount == 0)
+        #expect(service.openSettingsCallCount == 0)
+        #expect(legacy.removeCallCount == 1)
+        #expect(legacy.isInstalled)
+    }
+
+    @Test(arguments: [
+        LaunchAtLoginServiceStatus.requiresApproval,
+        .notRegistered,
+        .notFound,
+        .unknown,
+    ])
+    @MainActor
+    func modernEnabledDiagnosticsReportPendingCleanupWithoutMutating(
+        authorizationStatus: LaunchAtLoginServiceStatus
+    ) {
+        let service = FakeLaunchAtLoginService(status: .enabled)
+        let legacy = FakeLegacyLaunchAtLoginArtifact(
+            isInstalled: true,
+            authorizationStatus: authorizationStatus
+        )
+        let controller = LaunchAtLoginController(
+            service: service,
+            legacyArtifact: legacy,
+            isRunningAsApplicationBundle: true
+        )
+
+        #expect(controller.diagnostics() == LaunchAtLoginDiagnostics(
+            serviceStatus: .enabled,
+            legacyArtifactInstalled: true,
+            legacyAuthorizationStatus: authorizationStatus,
+            migrationNeeded: true
+        ))
+        #expect(service.registerCallCount == 0)
+        #expect(service.unregisterCallCount == 0)
+        #expect(service.openSettingsCallCount == 0)
+        #expect(legacy.removeCallCount == 0)
+        #expect(legacy.isInstalled)
+    }
+
     @Test @MainActor
     func userEnableFromNotFoundUsesModernServiceAndNeverCreatesLegacyArtifact() throws {
         let service = FakeLaunchAtLoginService(status: .notFound, statusAfterRegister: .enabled)

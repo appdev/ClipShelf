@@ -215,6 +215,11 @@ final class LaunchAtLoginController {
             return .notNeeded
         }
 
+        let serviceStatus = service.status
+        if serviceStatus == .enabled {
+            return removeLegacyAfterEnablement()
+        }
+
         switch legacyArtifact.authorizationStatus {
         case .enabled:
             break
@@ -224,9 +229,7 @@ final class LaunchAtLoginController {
             return .retainedLegacy(.modernServiceInactive)
         }
 
-        switch service.status {
-        case .enabled:
-            return removeLegacyAfterEnablement()
+        switch serviceStatus {
         case .notRegistered, .notFound:
             do {
                 try service.register()
@@ -245,6 +248,8 @@ final class LaunchAtLoginController {
             return .retainedLegacy(.requiresApproval)
         case .unknown:
             return .retainedLegacy(.modernServiceInactive)
+        case .enabled:
+            return removeLegacyAfterEnablement()
         }
     }
 
@@ -278,16 +283,18 @@ final class LaunchAtLoginController {
     }
 
     func diagnostics() -> LaunchAtLoginDiagnostics {
+        let serviceStatus = service.status
         let legacyArtifactInstalled = legacyArtifact?.isInstalled ?? false
         let legacyAuthorizationStatus = legacyArtifactInstalled
             ? legacyArtifact?.authorizationStatus
             : nil
         return LaunchAtLoginDiagnostics(
-            serviceStatus: service.status,
+            serviceStatus: serviceStatus,
             legacyArtifactInstalled: legacyArtifactInstalled,
             legacyAuthorizationStatus: legacyAuthorizationStatus,
             migrationNeeded: isRunningAsApplicationBundle
-                && legacyAuthorizationStatus == .enabled
+                && legacyArtifactInstalled
+                && (serviceStatus == .enabled || legacyAuthorizationStatus == .enabled)
         )
     }
 
